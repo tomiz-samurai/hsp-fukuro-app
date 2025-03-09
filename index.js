@@ -1,8 +1,8 @@
 /**
  * Fukuro App Entry Point
  * 
- * This is the main entry point for the HSP-friendly Fukuro app.
- * It starts the Expo app using the Expo Router.
+ * This is the main entry point for the Fukuro HSP app.
+ * It registers the app with Expo and loads the root component.
  */
 
 import 'expo-router/entry';
