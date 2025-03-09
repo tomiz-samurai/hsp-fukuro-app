@@ -1,17 +1,15 @@
 /**
  * Not Found Screen
  * 
- * This screen is displayed when a route is not found.
- * It provides a gentle HSP-friendly error experience.
+ * HSP-friendly not found screen that displays when a route doesn't exist.
+ * Features calming design, clear instructions, and navigation options.
  */
 
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
-import { useRouter } from 'expo-router';
+import { View, StyleSheet, Image } from 'react-native';
+import { Stack, useRouter } from 'expo-router';
 import { useTheme } from 'react-native-paper';
-import { Ionicons } from '@expo/vector-icons';
 
-import ScreenWrapper from '@components/layout/ScreenWrapper';
 import Button from '@components/ui/atoms/Button';
 import { H2, Body1 } from '@components/ui/atoms/Typography';
 import { AppTheme } from '@config/theme';
@@ -21,30 +19,39 @@ export default function NotFoundScreen() {
   const router = useRouter();
   
   return (
-    <ScreenWrapper>
-      <View style={styles.container}>
-        <View style={styles.iconContainer}>
-          <Ionicons
-            name="search-outline"
-            size={80}
-            color={theme.colors.primary}
-            style={styles.icon}
-          />
-        </View>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <Stack.Screen options={{ headerShown: false }} />
+      
+      <View style={styles.content}>
+        <Image
+          source={require('@assets/images/owl-not-found.png')}
+          style={styles.illustration}
+          resizeMode="contain"
+        />
         
         <H2 style={styles.title}>ページが見つかりません</H2>
         
         <Body1 style={styles.message}>
-          お探しのページが見つかりませんでした。別のページをお試しください。
+          お探しのページは見つかりませんでした。
+          URLを確認するか、ホームに戻って再度お試しください。
         </Body1>
         
-        <Button
-          label="ホームに戻る"
-          onPress={() => router.replace('/')}
-          style={styles.button}
-        />
+        <View style={styles.buttonsContainer}>
+          <Button
+            label="ホームに戻る"
+            onPress={() => router.replace('/')}
+            style={styles.button}
+          />
+          
+          <Button
+            label="戻る"
+            onPress={() => router.back()}
+            variant="outline"
+            style={styles.button}
+          />
+        </View>
       </View>
-    </ScreenWrapper>
+    </View>
   );
 }
 
@@ -53,13 +60,16 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    padding: 20,
   },
-  iconContainer: {
+  content: {
+    alignItems: 'center',
+    maxWidth: 500,
+  },
+  illustration: {
+    width: 200,
+    height: 200,
     marginBottom: 24,
-  },
-  icon: {
-    opacity: 0.8,
   },
   title: {
     marginBottom: 16,
@@ -67,10 +77,17 @@ const styles = StyleSheet.create({
   },
   message: {
     textAlign: 'center',
-    opacity: 0.8,
     marginBottom: 32,
+    lineHeight: 24,
+    opacity: 0.8,
+  },
+  buttonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    width: '100%',
   },
   button: {
-    minWidth: 200,
+    minWidth: 120,
+    margin: 8,
   },
 });
