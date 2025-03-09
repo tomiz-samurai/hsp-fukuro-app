@@ -1,55 +1,51 @@
 /**
  * Error Screen
  * 
- * HSP-friendly error screen that displays when a route fails to load.
- * Features calming design, clear instructions, and recovery options.
+ * This is the global error screen for the application.
+ * It shows a friendly error message with HSP-friendly design.
  */
 
 import React from 'react';
 import { View, StyleSheet, Image } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
 import { useTheme } from 'react-native-paper';
+import { Link, ErrorBoundaryProps } from 'expo-router';
 
+import { H2, Body1 } from '@components/ui/atoms/Typography';
 import Button from '@components/ui/atoms/Button';
-import { H2, H3, Body1 } from '@components/ui/atoms/Typography';
 import { AppTheme } from '@config/theme';
 
-export default function ErrorScreen() {
+export default function ErrorScreen(props: ErrorBoundaryProps) {
   const theme = useTheme() as AppTheme;
-  const router = useRouter();
   
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <Stack.Screen options={{ headerShown: false }} />
-      
       <View style={styles.content}>
         <Image
-          source={require('@assets/images/owl-error.png')}
-          style={styles.illustration}
+          source={require('@assets/images/owl-sad.png')}
+          style={styles.image}
           resizeMode="contain"
         />
         
         <H2 style={styles.title}>問題が発生しました</H2>
         
         <Body1 style={styles.message}>
-          申し訳ありませんが、エラーが発生しました。
-          深呼吸をして、少し落ち着いてから再試行してください。
-          問題が解決しない場合は、サポートにお問い合わせください。
+          申し訳ありませんが、予期せぬエラーが発生しました。リラックスして、もう一度試してみてください。
         </Body1>
         
-        <View style={styles.buttonsContainer}>
+        <View style={styles.actions}>
           <Button
             label="ホームに戻る"
-            onPress={() => router.replace('/')}
+            onPress={() => props.retry()}
             style={styles.button}
           />
           
-          <Button
-            label="再試行"
-            onPress={() => router.reload()}
-            variant="outline"
-            style={styles.button}
-          />
+          <Link href="/" asChild>
+            <Button
+              label="アプリを再起動"
+              variant="outline"
+              style={styles.button}
+            />
+          </Link>
         </View>
       </View>
     </View>
@@ -61,15 +57,15 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: 16,
   },
   content: {
     alignItems: 'center',
-    maxWidth: 500,
+    maxWidth: 400,
   },
-  illustration: {
-    width: 200,
-    height: 200,
+  image: {
+    width: 120,
+    height: 120,
     marginBottom: 24,
   },
   title: {
@@ -79,16 +75,12 @@ const styles = StyleSheet.create({
   message: {
     textAlign: 'center',
     marginBottom: 32,
-    lineHeight: 24,
     opacity: 0.8,
   },
-  buttonsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
+  actions: {
     width: '100%',
   },
   button: {
-    minWidth: 120,
-    margin: 8,
+    marginBottom: 12,
   },
 });
