@@ -1,8 +1,8 @@
 /**
  * Profile Screen
  * 
- * User profile page with usage statistics, settings, and account management.
- * Designed with HSP considerations for visual comfort and user experience.
+ * Displays user profile information, usage statistics, and provides
+ * access to settings specific to HSP needs.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -11,25 +11,58 @@ import {
   StyleSheet, 
   Image, 
   TouchableOpacity, 
-  Alert,
-  ActivityIndicator,
   ScrollView,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useTheme } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { format } from 'date-fns';
-import { ja } from 'date-fns/locale';
 
 import ScreenWrapper from '@components/layout/ScreenWrapper';
 import Card from '@components/ui/molecules/Card';
-import { H2, H3, Body1, Body2, Subtitle1, Subtitle2 } from '@components/ui/atoms/Typography';
+import Button from '@components/ui/atoms/Button';
+import { H2, H3, Body1, Body2, Subtitle1 } from '@components/ui/atoms/Typography';
 import { useAuth } from '@components/providers/AuthProvider';
 import { useAuthStore } from '@store/slices/authSlice';
 import { useAccessibilityStore } from '@store/slices/uiSlice';
 import { MeditationService } from '@services/meditation.service';
 import { AppTheme } from '@config/theme';
+
+// Profile menu items
+const MENU_ITEMS = [
+  {
+    id: 'settings',
+    title: '設定',
+    icon: 'settings-outline',
+    route: '/profile/settings',
+  },
+  {
+    id: 'accessibility',
+    title: 'アクセシビリティ',
+    icon: 'eye-outline',
+    route: '/profile/accessibility',
+  },
+  {
+    id: 'premium',
+    title: 'プレミアム',
+    icon: 'star-outline',
+    route: '/profile/premium',
+  },
+  {
+    id: 'help',
+    title: 'ヘルプ',
+    icon: 'help-circle-outline',
+    route: '/profile/help',
+  },
+  {
+    id: 'about',
+    title: 'このアプリについて',
+    icon: 'information-circle-outline',
+    route: '/profile/about',
+  },
+];
 
 // Profile screen component
 export default function ProfileScreen() {
@@ -39,108 +72,95 @@ export default function ProfileScreen() {
   const { user, profile, signOut } = useAuth();
   const { hapticsEnabled } = useAccessibilityStore();
   const isPremium = useAuthStore((state) => state.isPremium);
-  const resetAuthState = useAuthStore((state) => state.resetState);
   
   // State
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalMeditationMinutes: 0,
     meditationStreak: 0,
-    totalChatMessages: 0,
     favoriteActivities: ['瞑想', 'チャット'],
   });
   
-  // Fetch user data
+  // Load user statistics
   useEffect(() => {
-    loadUserData();
+    loadUserStats();
   }, [user?.id]);
   
-  // Load user data
-  const loadUserData = async () => {
+  // Load user statistics
+  const loadUserStats = async () => {
     if (!user?.id) return;
     
     try {
       setLoading(true);
       
-      // Get meditation stats
-      const totalMeditationMinutes = await MeditationService.getTotalMeditationTime(user.id);
+      // Get meditation statistics
+      const totalMeditationTime = await MeditationService.getTotalMeditationTime(user.id);
       const meditationStreak = await MeditationService.getMeditationStreak(user.id);
-      
-      // Mock chat stats for now
-      const totalChatMessages = 24;
       
       // Update stats
       setStats({
-        totalMeditationMinutes,
+        totalMeditationMinutes: totalMeditationTime,
         meditationStreak,
-        totalChatMessages,
-        favoriteActivities: totalMeditationMinutes > totalChatMessages ? ['瞑想', 'チャット'] : ['チャット', '瞑想'],
+        favoriteActivities: ['瞑想', 'チャット'], // Mock data
       });
       
       setLoading(false);
     } catch (error) {
-      console.error('Error loading user data:', error);
+      console.error('Error loading user stats:', error);
       setLoading(false);
     }
   };
   
-  // Handle logout
-  const handleLogout = () => {
+  // Navigate to profile edit
+  const navigateToProfileEdit = () => {
+    router.push('/profile/edit');
+  };
+  
+  // Navigate to menu item
+  const navigateToMenuItem = (route: string) => {
     if (hapticsEnabled) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     
+    router.push(route);
+  };
+  
+  // Handle sign out
+  const handleSignOut = () => {
     Alert.alert(
-      'ログアウト',
-      'アカウントからログアウトしますか？',
+      'ログアウトの確認',
+      '本当にログアウトしますか？',
       [
         { text: 'キャンセル', style: 'cancel' },
         { 
           text: 'ログアウト', 
-          style: 'destructive',
           onPress: async () => {
-            try {
-              await signOut();
-              resetAuthState();
-              router.replace('/login');
-            } catch (error) {
-              console.error('Error signing out:', error);
+            if (hapticsEnabled) {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             }
+            await signOut();
           },
+          style: 'destructive'
         },
       ]
     );
   };
   
-  // Navigate to settings
-  const navigateToSettings = () => {
-    if (hapticsEnabled) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  // Format minutes as hours and minutes
+  const formatMinutes = (minutes: number): string => {
+    if (minutes < 60) {
+      return `${minutes}分`;
     }
     
-    router.push('/profile/settings');
-  };
-  
-  // Navigate to premium subscription
-  const navigateToPremium = () => {
-    if (hapticsEnabled) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    
+    if (remainingMinutes === 0) {
+      return `${hours}時間`;
     }
     
-    router.push('/profile/premium');
+    return `${hours}時間${remainingMinutes}分`;
   };
-  
-  // Loading state
-  if (loading) {
-    return (
-      <ScreenWrapper>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.primary} />
-          <Body1 style={styles.loadingText}>読み込み中...</Body1>
-        </View>
-      </ScreenWrapper>
-    );
-  }
   
   return (
     <ScreenWrapper scrollable>
@@ -149,216 +169,142 @@ export default function ProfileScreen() {
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerContent}>
-            {/* Profile image */}
-            <View style={styles.profileImageContainer}>
+          <H2>プロフィール</H2>
+        </View>
+        
+        {/* User Profile Card */}
+        <Card style={styles.profileCard}>
+          <View style={styles.profileContent}>
+            {/* Avatar */}
+            <View style={styles.avatarContainer}>
               <Image
                 source={profile?.avatar_url ? { uri: profile.avatar_url } : require('@assets/images/default-avatar.png')}
-                style={styles.profileImage}
+                style={styles.avatar}
               />
               
-              {/* Premium badge */}
-              {isPremium && (
-                <View style={[styles.premiumBadge, { backgroundColor: theme.colors.secondary }]}>
-                  <Ionicons name="star" size={12} color="white" />
-                </View>
-              )}
+              {/* Edit button */}
+              <TouchableOpacity
+                style={[styles.editButton, { backgroundColor: theme.colors.primary }]}
+                onPress={navigateToProfileEdit}
+              >
+                <Ionicons name="pencil" size={16} color="white" />
+              </TouchableOpacity>
             </View>
             
             {/* User info */}
             <View style={styles.userInfo}>
-              <H2>{profile?.display_name || user?.email?.split('@')[0]}</H2>
-              <Body1 style={styles.email}>{user?.email}</Body1>
+              <H3 style={styles.userName}>
+                {profile?.display_name || user?.email?.split('@')[0] || 'ユーザー'}
+              </H3>
               
-              {/* Membership status */}
-              <View style={styles.membershipRow}>
-                <View 
-                  style={[
-                    styles.membershipBadge,
-                    { 
-                      backgroundColor: isPremium 
-                        ? theme.colors.secondaryContainer 
-                        : theme.colors.surfaceVariant,
-                    },
-                  ]}
-                >
-                  <Body2 
-                    style={{ 
-                      color: isPremium ? theme.colors.secondary : theme.colors.textSecondary,
-                    }}
-                  >
-                    {isPremium ? 'プレミアム会員' : '無料会員'}
-                  </Body2>
+              <Body1 style={styles.userEmail}>
+                {user?.email || ''}
+              </Body1>
+              
+              {/* Premium badge */}
+              {isPremium && (
+                <View style={[styles.premiumBadge, { backgroundColor: theme.colors.secondary }]}>
+                  <Ionicons name="star" size={12} color="white" style={styles.premiumIcon} />
+                  <Body2 style={styles.premiumText}>プレミアム</Body2>
                 </View>
-                
-                {!isPremium && (
-                  <TouchableOpacity 
-                    style={styles.upgradeButton}
-                    onPress={navigateToPremium}
-                  >
-                    <Body2 color={theme.colors.primary}>アップグレード</Body2>
-                  </TouchableOpacity>
-                )}
-              </View>
+              )}
             </View>
           </View>
-          
-          {/* Action buttons */}
-          <View style={styles.actionButtons}>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={navigateToSettings}
-            >
-              <Ionicons name="settings-outline" size={24} color={theme.colors.text} />
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={handleLogout}
-            >
-              <Ionicons name="log-out-outline" size={24} color={theme.colors.text} />
-            </TouchableOpacity>
-          </View>
-        </View>
+        </Card>
         
-        {/* Usage Stats */}
-        <View style={styles.section}>
-          <H3 style={styles.sectionTitle}>利用状況</H3>
+        {/* Statistics Cards */}
+        <View style={styles.statsContainer}>
+          {/* Meditation Stats Card */}
+          <Card style={styles.statsCard}>
+            <View style={styles.statsContent}>
+              <Ionicons name="time-outline" size={24} color={theme.colors.primary} style={styles.statsIcon} />
+              <View style={styles.statsInfo}>
+                <Body1 weight="medium" style={styles.statsTitle}>瞑想時間</Body1>
+                <H3 style={styles.statsValue}>
+                  {loading ? (
+                    <ActivityIndicator size="small" color={theme.colors.primary} />
+                  ) : (
+                    formatMinutes(stats.totalMeditationMinutes)
+                  )}
+                </H3>
+              </View>
+            </View>
+          </Card>
           
-          <View style={styles.statsGrid}>
-            {/* Meditation Time */}
-            <Card style={styles.statCard}>
-              <View style={styles.statCardContent}>
-                <Ionicons name="time-outline" size={24} color={theme.colors.primary} style={styles.statIcon} />
-                <Body1 weight="medium" style={styles.statValue}>{stats.totalMeditationMinutes}分</Body1>
-                <Body2 style={styles.statLabel}>瞑想時間</Body2>
+          {/* Streak Stats Card */}
+          <Card style={styles.statsCard}>
+            <View style={styles.statsContent}>
+              <Ionicons name="flame-outline" size={24} color={theme.colors.primary} style={styles.statsIcon} />
+              <View style={styles.statsInfo}>
+                <Body1 weight="medium" style={styles.statsTitle}>継続日数</Body1>
+                <H3 style={styles.statsValue}>
+                  {loading ? (
+                    <ActivityIndicator size="small" color={theme.colors.primary} />
+                  ) : (
+                    `${stats.meditationStreak}日`
+                  )}
+                </H3>
               </View>
-            </Card>
-            
-            {/* Meditation Streak */}
-            <Card style={styles.statCard}>
-              <View style={styles.statCardContent}>
-                <Ionicons name="flame-outline" size={24} color={theme.colors.accent} style={styles.statIcon} />
-                <Body1 weight="medium" style={styles.statValue}>{stats.meditationStreak}日</Body1>
-                <Body2 style={styles.statLabel}>連続記録</Body2>
-              </View>
-            </Card>
-            
-            {/* Chat Messages */}
-            <Card style={styles.statCard}>
-              <View style={styles.statCardContent}>
-                <Ionicons name="chatbubbles-outline" size={24} color={theme.colors.secondary} style={styles.statIcon} />
-                <Body1 weight="medium" style={styles.statValue}>{stats.totalChatMessages}</Body1>
-                <Body2 style={styles.statLabel}>会話数</Body2>
-              </View>
-            </Card>
-            
-            {/* Favorite Activity */}
-            <Card style={styles.statCard}>
-              <View style={styles.statCardContent}>
-                <Ionicons name="heart-outline" size={24} color={theme.colors.error} style={styles.statIcon} />
-                <Body1 weight="medium" style={styles.statValue}>{stats.favoriteActivities[0]}</Body1>
-                <Body2 style={styles.statLabel}>よく使う機能</Body2>
-              </View>
-            </Card>
-          </View>
-        </View>
-        
-        {/* Quick Settings */}
-        <View style={styles.section}>
-          <H3 style={styles.sectionTitle}>クイック設定</H3>
-          
-          <Card>
-            <View style={styles.settingsList}>
-              {/* Account settings */}
-              <TouchableOpacity
-                style={styles.settingsItem}
-                onPress={() => router.push('/profile/account')}
-              >
-                <Ionicons name="person-outline" size={24} color={theme.colors.primary} style={styles.settingsIcon} />
-                <View style={styles.settingsContent}>
-                  <Body1>アカウント設定</Body1>
-                  <Body2 style={styles.settingsDescription}>プロフィール情報の編集</Body2>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
-              </TouchableOpacity>
-              
-              {/* Notifications */}
-              <TouchableOpacity
-                style={styles.settingsItem}
-                onPress={() => router.push('/profile/notifications')}
-              >
-                <Ionicons name="notifications-outline" size={24} color={theme.colors.primary} style={styles.settingsIcon} />
-                <View style={styles.settingsContent}>
-                  <Body1>通知設定</Body1>
-                  <Body2 style={styles.settingsDescription}>通知と思い出し設定</Body2>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
-              </TouchableOpacity>
-              
-              {/* Appearance */}
-              <TouchableOpacity
-                style={styles.settingsItem}
-                onPress={() => router.push('/profile/appearance')}
-              >
-                <Ionicons name="color-palette-outline" size={24} color={theme.colors.primary} style={styles.settingsIcon} />
-                <View style={styles.settingsContent}>
-                  <Body1>表示設定</Body1>
-                  <Body2 style={styles.settingsDescription}>テーマとHSP向け視覚調整</Body2>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
-              </TouchableOpacity>
             </View>
           </Card>
         </View>
         
-        {/* More Options */}
-        <View style={styles.section}>
-          <Card>
-            <View style={styles.moreOptionsList}>
-              {/* Help */}
-              <TouchableOpacity
-                style={styles.moreOption}
-                onPress={() => router.push('/profile/help')}
-              >
-                <Ionicons name="help-circle-outline" size={22} color={theme.colors.text} style={styles.moreOptionIcon} />
-                <Body1>ヘルプとサポート</Body1>
-              </TouchableOpacity>
-              
-              {/* About */}
-              <TouchableOpacity
-                style={styles.moreOption}
-                onPress={() => router.push('/profile/about')}
-              >
-                <Ionicons name="information-circle-outline" size={22} color={theme.colors.text} style={styles.moreOptionIcon} />
-                <Body1>アプリについて</Body1>
-              </TouchableOpacity>
-              
-              {/* Feedback */}
-              <TouchableOpacity
-                style={styles.moreOption}
-                onPress={() => router.push('/profile/feedback')}
-              >
-                <Ionicons name="chatbox-outline" size={22} color={theme.colors.text} style={styles.moreOptionIcon} />
-                <Body1>フィードバック</Body1>
-              </TouchableOpacity>
-              
-              {/* Privacy */}
-              <TouchableOpacity
-                style={[styles.moreOption, styles.noBorder]}
-                onPress={() => router.push('/profile/privacy')}
-              >
-                <Ionicons name="lock-closed-outline" size={22} color={theme.colors.text} style={styles.moreOptionIcon} />
-                <Body1>プライバシーとセキュリティ</Body1>
-              </TouchableOpacity>
+        {/* Premium Upsell Card (if not premium) */}
+        {!isPremium && (
+          <Card 
+            style={styles.premiumCard} 
+            onPress={() => navigateToMenuItem('/profile/premium')}
+            backgroundColor={theme.colors.secondaryContainer}
+          >
+            <View style={styles.premiumCardContent}>
+              <Ionicons
+                name="star"
+                size={32}
+                color={theme.colors.secondary}
+                style={styles.premiumCardIcon}
+              />
+              <View style={styles.premiumCardTextContainer}>
+                <H3>プレミアム会員になる</H3>
+                <Body1>
+                  すべての機能とコンテンツにアクセスして、より充実したセルフケア体験を。
+                </Body1>
+              </View>
             </View>
           </Card>
+        )}
+        
+        {/* Menu Items */}
+        <View style={styles.menuContainer}>
+          {MENU_ITEMS.map((item) => (
+            <TouchableOpacity
+              key={item.id}
+              style={styles.menuItem}
+              onPress={() => navigateToMenuItem(item.route)}
+            >
+              <View style={styles.menuIconContainer}>
+                <Ionicons name={item.icon as any} size={24} color={theme.colors.primary} />
+              </View>
+              <View style={styles.menuTextContainer}>
+                <Body1 weight="medium">{item.title}</Body1>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          ))}
         </View>
         
-        {/* Version info */}
-        <View style={styles.versionContainer}>
-          <Body2 style={styles.versionText}>Fukuro v0.1.0</Body2>
-        </View>
+        {/* Sign Out Button */}
+        <Button
+          label="ログアウト"
+          variant="outline"
+          onPress={handleSignOut}
+          fullWidth
+          style={styles.signOutButton}
+        />
+        
+        {/* App Version */}
+        <Body2 style={styles.versionText} align="center">
+          Fukuro v0.1.0
+        </Body2>
       </View>
     </ScreenWrapper>
   );
@@ -370,144 +316,124 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
+    marginBottom: 16,
   },
-  headerContent: {
-    flexDirection: 'row',
-    flex: 1,
+  profileCard: {
+    marginBottom: 16,
   },
-  profileImageContainer: {
+  profileContent: {
+    flexDirection: 'row',
+    padding: 16,
+    alignItems: 'center',
+  },
+  avatarContainer: {
     position: 'relative',
     marginRight: 16,
   },
-  profileImage: {
+  avatar: {
     width: 80,
     height: 80,
     borderRadius: 40,
+    backgroundColor: '#E1E1E1',
   },
-  premiumBadge: {
+  editButton: {
     position: 'absolute',
     bottom: 0,
     right: 0,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    justifyContent: 'center',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   userInfo: {
     flex: 1,
-    justifyContent: 'center',
   },
-  email: {
-    marginTop: 4,
-    opacity: 0.7,
-  },
-  membershipRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  membershipBadge: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 4,
-  },
-  upgradeButton: {
-    marginLeft: 8,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  actionButton: {
-    padding: 8,
-    marginLeft: 8,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    marginBottom: 12,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  statCard: {
-    width: '48%',
-    marginBottom: 12,
-  },
-  statCardContent: {
-    padding: 16,
-    alignItems: 'center',
-  },
-  statIcon: {
-    marginBottom: 8,
-  },
-  statValue: {
+  userName: {
     marginBottom: 4,
   },
-  statLabel: {
+  userEmail: {
     opacity: 0.7,
+    marginBottom: 8,
   },
-  settingsList: {
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  settingsItem: {
+  premiumBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.05)',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
   },
-  settingsIcon: {
-    marginRight: 16,
+  premiumIcon: {
+    marginRight: 4,
   },
-  settingsContent: {
+  premiumText: {
+    color: 'white',
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  statsCard: {
+    flex: 1,
+    marginHorizontal: 4,
+  },
+  statsContent: {
+    flexDirection: 'row',
+    padding: 12,
+    alignItems: 'center',
+  },
+  statsIcon: {
+    marginRight: 12,
+  },
+  statsInfo: {
     flex: 1,
   },
-  settingsDescription: {
-    marginTop: 2,
-    opacity: 0.7,
+  statsTitle: {
+    marginBottom: 4,
   },
-  moreOptionsList: {
-    borderRadius: 8,
-    overflow: 'hidden',
+  statsValue: {
+    fontSize: 20,
   },
-  moreOption: {
+  premiumCard: {
+    marginBottom: 24,
+  },
+  premiumCardContent: {
+    flexDirection: 'row',
+    padding: 16,
+    alignItems: 'center',
+  },
+  premiumCardIcon: {
+    marginRight: 16,
+  },
+  premiumCardTextContainer: {
+    flex: 1,
+  },
+  menuContainer: {
+    marginBottom: 24,
+  },
+  menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(0,0,0,0.05)',
   },
-  moreOptionIcon: {
-    marginRight: 16,
-  },
-  noBorder: {
-    borderBottomWidth: 0,
-  },
-  versionContainer: {
+  menuIconContainer: {
+    width: 40,
+    height: 40,
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 32,
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  menuTextContainer: {
+    flex: 1,
+  },
+  signOutButton: {
+    marginBottom: 24,
   },
   versionText: {
     opacity: 0.5,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 16,
+    marginBottom: 16,
   },
 });
