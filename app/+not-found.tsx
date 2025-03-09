@@ -1,57 +1,64 @@
 /**
  * Not Found Screen
  * 
- * HSP-friendly not found screen that displays when a route doesn't exist.
- * Features calming design, clear instructions, and navigation options.
+ * Displayed when a route is not found, with HSP-friendly design.
+ * Features a calming design and easy navigation back.
  */
 
 import React from 'react';
 import { View, StyleSheet, Image } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useTheme } from 'react-native-paper';
 
+import ScreenWrapper from '@components/layout/ScreenWrapper';
+import Card from '@components/ui/molecules/Card';
 import Button from '@components/ui/atoms/Button';
 import { H2, Body1 } from '@components/ui/atoms/Typography';
 import { AppTheme } from '@config/theme';
 
+// Not found screen component
 export default function NotFoundScreen() {
+  // Hooks
   const theme = useTheme() as AppTheme;
   const router = useRouter();
   
+  // Navigate back to home
+  const handleGoHome = () => {
+    router.replace('/');
+  };
+  
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <Stack.Screen options={{ headerShown: false }} />
-      
-      <View style={styles.content}>
-        <Image
-          source={require('@assets/images/owl-not-found.png')}
-          style={styles.illustration}
-          resizeMode="contain"
-        />
-        
-        <H2 style={styles.title}>ページが見つかりません</H2>
-        
-        <Body1 style={styles.message}>
-          お探しのページは見つかりませんでした。
-          URLを確認するか、ホームに戻って再度お試しください。
-        </Body1>
-        
-        <View style={styles.buttonsContainer}>
-          <Button
-            label="ホームに戻る"
-            onPress={() => router.replace('/')}
-            style={styles.button}
-          />
-          
-          <Button
-            label="戻る"
-            onPress={() => router.back()}
-            variant="outline"
-            style={styles.button}
-          />
-        </View>
+    <ScreenWrapper
+      padding="medium"
+      safeAreaProps={{
+        edges: ['top', 'bottom'],
+      }}
+    >
+      <View style={styles.container}>
+        <Card style={styles.card} elevation="low">
+          <View style={styles.content}>
+            {/* Owl image */}
+            <Image
+              source={require('@assets/images/owl-confused.png')}
+              style={styles.image}
+              resizeMode="contain"
+            />
+            
+            <H2 style={styles.title}>ページが見つかりません</H2>
+            
+            <Body1 style={styles.message}>
+              お探しのページはありません。お手数ですが、ホーム画面にお戻りください。
+            </Body1>
+            
+            <Button
+              label="ホームに戻る"
+              onPress={handleGoHome}
+              style={styles.button}
+            />
+          </View>
+        </Card>
       </View>
-    </View>
+    </ScreenWrapper>
   );
 }
 
@@ -60,34 +67,31 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: 16,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 400,
   },
   content: {
+    padding: 24,
     alignItems: 'center',
-    maxWidth: 500,
   },
-  illustration: {
-    width: 200,
-    height: 200,
+  image: {
+    width: 150,
+    height: 150,
     marginBottom: 24,
   },
   title: {
-    marginBottom: 16,
     textAlign: 'center',
+    marginBottom: 16,
   },
   message: {
     textAlign: 'center',
-    marginBottom: 32,
-    lineHeight: 24,
+    marginBottom: 24,
     opacity: 0.8,
   },
-  buttonsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    width: '100%',
-  },
   button: {
-    minWidth: 120,
-    margin: 8,
+    minWidth: 150,
   },
 });
