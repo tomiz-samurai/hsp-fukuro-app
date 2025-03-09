@@ -1,8 +1,8 @@
 /**
  * App Entry Point
  * 
- * This is the main entry point for the Fukuro HSP application.
- * It registers and starts the Expo Router powered application.
+ * This file is the entry point for the Fukuro HSP app.
+ * It registers the main component with Expo and handles initialization.
  */
 
 import 'expo-router/entry';
