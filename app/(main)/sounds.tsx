@@ -1,8 +1,8 @@
 /**
  * Sounds Screen
  * 
- * Browse and play ambient sounds with HSP-friendly design.
- * Features categorized sound files, mixing capabilities, and timers.
+ * Browse and play relaxing sounds with HSP-friendly design.
+ * Features categorized sound sections, favorites, and volume control.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -10,21 +10,19 @@ import {
   View, 
   StyleSheet, 
   ScrollView, 
-  FlatList, 
   TouchableOpacity, 
   ActivityIndicator,
-  Platform
+  Platform,
 } from 'react-native';
+import { useRouter, Stack } from 'expo-router';
 import { useTheme } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
-import { Audio, AVPlaybackStatus } from 'expo-av';
+import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
-import Slider from '@react-native-community/slider';
 
 import ScreenWrapper from '@components/layout/ScreenWrapper';
 import Card from '@components/ui/molecules/Card';
 import SoundCard from '@components/ui/organisms/SoundCard';
-import Button from '@components/ui/atoms/Button';
 import { H2, H3, Body1, Body2, Subtitle1 } from '@components/ui/atoms/Typography';
 import { useAuth } from '@components/providers/AuthProvider';
 import { useAuthStore } from '@store/slices/authSlice';
@@ -32,46 +30,41 @@ import { useAccessibilityStore } from '@store/slices/uiSlice';
 import { SoundService, SoundItem, SoundCategory, SoundInstance } from '@services/sound.service';
 import { AppTheme } from '@config/theme';
 
-// Timer durations (in minutes)
-const TIMER_DURATIONS = [15, 30, 45, 60, 90, 120];
+// Organized category type
+interface SoundCategoryData {
+  id: SoundCategory;
+  title: string;
+  icon: string;
+  sounds: SoundItem[];
+}
 
 // Sounds screen component
 export default function SoundsScreen() {
   // Hooks
   const theme = useTheme() as AppTheme;
+  const router = useRouter();
   const { user } = useAuth();
   const { hapticsEnabled } = useAccessibilityStore();
   const isPremium = useAuthStore((state) => state.isPremium);
   
   // State
-  const [sounds, setSounds] = useState<SoundItem[]>([]);
-  const [playingSounds, setPlayingSounds] = useState<Map<string, SoundInstance>>(new Map());
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [loading, setLoading] = useState(true);
-  const [favorites, setFavorites] = useState<string[]>([]);
-  const [masterVolume, setMasterVolume] = useState(0.8);
-  const [timerActive, setTimerActive] = useState(false);
-  const [timerDuration, setTimerDuration] = useState<number | null>(null);
-  const [timerRemaining, setTimerRemaining] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<'all' | 'favorites'>('all');
+  const [categories, setCategories] = useState<SoundCategoryData[]>([]);
+  const [favoriteSounds, setFavoriteSounds] = useState<string[]>([]);
+  const [playingSounds, setPlayingSounds] = useState<Record<string, SoundInstance>>({});
   
-  // Refs
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // Fetch sound data
+  // Load sounds on component mount
   useEffect(() => {
-    loadSounds();
-    
     // Set up audio mode for background playback
     setupAudioMode();
     
+    // Load sounds
+    loadSounds();
+    
+    // Clean up on unmount
     return () => {
-      // Clean up sounds
       stopAllSounds();
-      
-      // Clear timer
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
     };
   }, [isPremium]);
   
@@ -91,17 +84,55 @@ export default function SoundsScreen() {
     }
   };
   
-  // Load sounds
+  // Load sounds data
   const loadSounds = async () => {
     try {
       setLoading(true);
       
-      // Get all sounds
-      const allSounds = await SoundService.getSounds(isPremium);
-      setSounds(allSounds);
+      // Get all available sounds
+      const sounds = await SoundService.getSounds(isPremium);
+      
+      // Group sounds by category
+      const categorizedSounds: SoundCategoryData[] = [
+        {
+          id: SoundCategory.NATURE,
+          title: '自然',
+          icon: 'leaf-outline',
+          sounds: sounds.filter(s => s.category === SoundCategory.NATURE),
+        },
+        {
+          id: SoundCategory.WHITE_NOISE,
+          title: 'ホワイトノイズ',
+          icon: 'radio-outline',
+          sounds: sounds.filter(s => s.category === SoundCategory.WHITE_NOISE),
+        },
+        {
+          id: SoundCategory.AMBIENT,
+          title: '環境音',
+          icon: 'cafe-outline',
+          sounds: sounds.filter(s => s.category === SoundCategory.AMBIENT),
+        },
+        {
+          id: SoundCategory.MUSIC,
+          title: '音楽',
+          icon: 'musical-notes-outline',
+          sounds: sounds.filter(s => s.category === SoundCategory.MUSIC),
+        },
+        {
+          id: SoundCategory.BINAURAL,
+          title: 'バイノーラル',
+          icon: 'pulse-outline',
+          sounds: sounds.filter(s => s.category === SoundCategory.BINAURAL),
+        },
+      ];
+      
+      // Remove empty categories
+      const nonEmptyCategories = categorizedSounds.filter(c => c.sounds.length > 0);
+      
+      setCategories(nonEmptyCategories);
       
       // Mock favorites for now
-      setFavorites(['nature-rain', 'nature-ocean', 'white-noise-fan']);
+      setFavoriteSounds(['nature-rain', 'white-noise-pink']);
       
       setLoading(false);
     } catch (error) {
@@ -110,135 +141,82 @@ export default function SoundsScreen() {
     }
   };
   
-  // Handle category selection
-  const handleCategorySelect = (categoryId: string) => {
-    if (hapticsEnabled) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    
-    setSelectedCategory(categoryId);
-  };
-  
-  // Handle sound play/pause
+  // Toggle sound playback
   const handlePlayToggle = async (sound: SoundItem) => {
-    if (hapticsEnabled) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
-    
-    // Check if sound is already playing
-    if (playingSounds.has(sound.id)) {
-      // Pause sound
-      await pauseSound(sound.id);
-    } else {
-      // Play sound
-      await playSound(sound);
-    }
-  };
-  
-  // Play a sound
-  const playSound = async (sound: SoundItem) => {
     try {
-      // Load sound if not already loaded
-      let soundInstance = Array.from(playingSounds.values()).find(s => s.id === sound.id);
+      // Check if sound is already playing
+      const isPlaying = !!playingSounds[sound.id];
       
-      if (!soundInstance) {
-        // Load the sound
-        soundInstance = await SoundService.loadSound(sound.id, isPremium);
+      if (isPlaying) {
+        // Pause sound
+        await SoundService.pauseSound(sound.id);
         
-        if (!soundInstance) {
-          console.error('Failed to load sound');
-          return;
+        // Update state
+        setPlayingSounds(prev => {
+          const updated = { ...prev };
+          delete updated[sound.id];
+          return updated;
+        });
+        
+        // Haptic feedback
+        if (hapticsEnabled) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        }
+      } else {
+        // Load and play sound
+        const soundInstance = await SoundService.loadSound(sound.id, isPremium);
+        
+        if (soundInstance) {
+          // Play sound
+          await SoundService.playSound(sound.id, isPremium);
+          
+          // Update state
+          setPlayingSounds(prev => ({
+            ...prev,
+            [sound.id]: soundInstance,
+          }));
+          
+          // Haptic feedback
+          if (hapticsEnabled) {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          }
         }
       }
-      
-      // Set volume
-      await SoundService.setVolume(sound.id, masterVolume);
-      
-      // Play the sound
-      await SoundService.playSound(sound.id, isPremium);
-      
-      // Update state
-      setPlayingSounds(new Map(playingSounds.set(sound.id, soundInstance)));
     } catch (error) {
-      console.error('Error playing sound:', error);
+      console.error('Error toggling sound playback:', error);
     }
   };
   
-  // Pause a sound
-  const pauseSound = async (soundId: string) => {
-    try {
-      // Pause the sound
-      await SoundService.pauseSound(soundId);
-      
-      // Update state
-      const newPlayingSounds = new Map(playingSounds);
-      newPlayingSounds.delete(soundId);
-      setPlayingSounds(newPlayingSounds);
-    } catch (error) {
-      console.error('Error pausing sound:', error);
-    }
-  };
-  
-  // Stop all sounds
-  const stopAllSounds = async () => {
-    try {
-      // Stop all playing sounds
-      for (const soundId of playingSounds.keys()) {
-        await SoundService.stopSound(soundId);
-      }
-      
-      // Clear playing sounds
-      setPlayingSounds(new Map());
-      
-      // Stop and clear timer
-      stopTimer();
-    } catch (error) {
-      console.error('Error stopping sounds:', error);
-    }
-  };
-  
-  // Handle volume change for a sound
+  // Handle volume change
   const handleVolumeChange = async (soundId: string, volume: number) => {
     try {
-      // Set volume for the sound
+      // Update volume
       await SoundService.setVolume(soundId, volume);
       
       // Update state
-      const soundInstance = playingSounds.get(soundId);
-      if (soundInstance) {
-        soundInstance.volume = volume;
-        setPlayingSounds(new Map(playingSounds.set(soundId, soundInstance)));
-      }
+      setPlayingSounds(prev => {
+        const updated = { ...prev };
+        if (updated[soundId]) {
+          updated[soundId] = {
+            ...updated[soundId],
+            volume,
+          };
+        }
+        return updated;
+      });
     } catch (error) {
       console.error('Error changing volume:', error);
     }
   };
   
-  // Handle master volume change
-  const handleMasterVolumeChange = async (volume: number) => {
-    setMasterVolume(volume);
-    
-    // Update volume for all playing sounds
-    try {
-      for (const [soundId, soundInstance] of playingSounds.entries()) {
-        await SoundService.setVolume(soundId, volume);
-        soundInstance.volume = volume;
-      }
-      
-      // Update state
-      setPlayingSounds(new Map(playingSounds));
-    } catch (error) {
-      console.error('Error changing master volume:', error);
-    }
-  };
-  
   // Toggle favorite status
   const handleToggleFavorite = (soundId: string) => {
+    // Haptic feedback
     if (hapticsEnabled) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     
-    setFavorites((prev) => {
+    setFavoriteSounds(prev => {
       if (prev.includes(soundId)) {
         return prev.filter(id => id !== soundId);
       } else {
@@ -247,109 +225,29 @@ export default function SoundsScreen() {
     });
   };
   
-  // Start sleep timer
-  const startTimer = (minutes: number) => {
-    if (hapticsEnabled) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
-    
-    // Clear existing timer
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-    }
-    
-    // Set timer duration and remaining time
-    const durationMs = minutes * 60 * 1000;
-    const endTime = Date.now() + durationMs;
-    
-    setTimerDuration(minutes);
-    setTimerRemaining(minutes * 60); // in seconds
-    setTimerActive(true);
-    
-    // Start timer interval
-    timerRef.current = setInterval(() => {
-      const remaining = Math.max(0, Math.round((endTime - Date.now()) / 1000));
-      setTimerRemaining(remaining);
+  // Switch between tabs
+  const handleTabChange = (tab: 'all' | 'favorites') => {
+    setActiveTab(tab);
+  };
+  
+  // Stop all playing sounds
+  const stopAllSounds = async () => {
+    try {
+      // Unload all sounds
+      await SoundService.unloadAll();
       
-      // Check if timer has finished
-      if (remaining <= 0) {
-        stopTimer();
-        stopAllSounds();
-        
-        // Haptic feedback
-        if (hapticsEnabled) {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        }
-      }
-    }, 1000);
-  };
-  
-  // Stop timer
-  const stopTimer = () => {
-    if (hapticsEnabled && timerActive) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      // Update state
+      setPlayingSounds({});
+    } catch (error) {
+      console.error('Error stopping sounds:', error);
     }
-    
-    // Clear timer
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    
-    // Reset timer state
-    setTimerActive(false);
-    setTimerDuration(null);
-    setTimerRemaining(null);
   };
   
-  // Format timer display
-  const formatTimerDisplay = (seconds: number | null) => {
-    if (seconds === null) return '';
-    
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const remainingSeconds = seconds % 60;
-    
-    return hours > 0
-      ? `${hours}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`
-      : `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  // Get favorite sounds
+  const getFavoriteSounds = () => {
+    const allSounds = categories.flatMap(c => c.sounds);
+    return allSounds.filter(s => favoriteSounds.includes(s.id));
   };
-  
-  // Filtered sounds based on selected category
-  const filteredSounds = selectedCategory === 'all'
-    ? sounds
-    : sounds.filter(s => s.category === selectedCategory as SoundCategory);
-  
-  // Favorite sounds
-  const favoriteSounds = sounds.filter(s => favorites.includes(s.id));
-  
-  // Render category item
-  const renderCategoryItem = ({ item }: { item: { id: string; label: string; icon: string } }) => (
-    <TouchableOpacity
-      style={[
-        styles.categoryItem,
-        selectedCategory === item.id && {
-          backgroundColor: theme.colors.primary,
-        },
-      ]}
-      onPress={() => handleCategorySelect(item.id)}
-    >
-      <Ionicons
-        name={item.icon as any}
-        size={20}
-        color={selectedCategory === item.id ? theme.colors.background : theme.colors.text}
-        style={styles.categoryIcon}
-      />
-      <Body2 
-        style={[
-          styles.categoryLabel,
-          selectedCategory === item.id && { color: theme.colors.background },
-        ]}
-      >
-        {item.label}
-      </Body2>
-    </TouchableOpacity>
-  );
   
   // Loading state
   if (loading) {
@@ -364,228 +262,197 @@ export default function SoundsScreen() {
   }
   
   return (
-    <ScreenWrapper scrollable>
+    <ScreenWrapper scrollable={false} padding="none">
+      <Stack.Screen options={{ headerShown: false }} />
+      
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
           <H2>サウンド</H2>
           <Body1 style={styles.subtitle}>
-            心地よい音環境でリラックス
+            リラックスと集中のための癒しの音
           </Body1>
+          
+          {/* Tab selector */}
+          <View style={styles.tabSelector}>
+            <TouchableOpacity
+              style={[
+                styles.tab,
+                activeTab === 'all' && [styles.activeTab, { backgroundColor: theme.colors.primary }],
+              ]}
+              onPress={() => handleTabChange('all')}
+            >
+              <Body1 
+                style={[
+                  styles.tabText,
+                  activeTab === 'all' && styles.activeTabText,
+                ]}
+              >
+                すべて
+              </Body1>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[
+                styles.tab,
+                activeTab === 'favorites' && [styles.activeTab, { backgroundColor: theme.colors.primary }],
+              ]}
+              onPress={() => handleTabChange('favorites')}
+            >
+              <Body1 
+                style={[
+                  styles.tabText,
+                  activeTab === 'favorites' && styles.activeTabText,
+                ]}
+              >
+                お気に入り
+              </Body1>
+            </TouchableOpacity>
+          </View>
         </View>
         
-        {/* Now Playing */}
-        {playingSounds.size > 0 && (
-          <Card style={styles.nowPlayingCard}>
-            <View style={styles.nowPlayingHeader}>
-              <H3>再生中</H3>
-              <TouchableOpacity onPress={stopAllSounds}>
-                <Body2 color={theme.colors.error}>すべて停止</Body2>
-              </TouchableOpacity>
-            </View>
-            
-            {/* Master Volume Control */}
-            <View style={styles.masterVolumeContainer}>
-              <Body2>全体音量</Body2>
-              <View style={styles.volumeSliderContainer}>
-                <Ionicons
-                  name={masterVolume > 0 ? (masterVolume > 0.5 ? 'volume-high' : 'volume-medium') : 'volume-mute'}
-                  size={22}
-                  color={theme.colors.text}
-                />
-                <Slider
-                  style={styles.volumeSlider}
-                  minimumValue={0}
-                  maximumValue={1}
-                  step={0.05}
-                  value={masterVolume}
-                  onValueChange={handleMasterVolumeChange}
-                  minimumTrackTintColor={theme.colors.primary}
-                  maximumTrackTintColor={theme.colors.surfaceVariant}
-                  thumbTintColor={theme.colors.primary}
-                />
-              </View>
-            </View>
-            
-            {/* Sleep Timer */}
-            <View style={styles.timerContainer}>
-              <Body2>スリープタイマー</Body2>
-              
-              {timerActive ? (
-                <View style={styles.activeTimerContainer}>
-                  <Body1 style={styles.timerDisplay}>
-                    {formatTimerDisplay(timerRemaining)}
-                  </Body1>
-                  <TouchableOpacity 
-                    style={styles.stopTimerButton}
-                    onPress={stopTimer}
-                  >
-                    <Ionicons
-                      name="close-circle"
-                      size={24}
-                      color={theme.colors.error}
-                    />
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.timerButtonsContainer}
-                >
-                  {TIMER_DURATIONS.map((duration) => (
-                    <Button
-                      key={`timer-${duration}`}
-                      label={`${duration}分`}
-                      variant="outline"
-                      size="small"
-                      style={styles.timerButton}
-                      onPress={() => startTimer(duration)}
+        {/* Scrollable content */}
+        <ScrollView
+          style={styles.scrollContent}
+          contentContainerStyle={styles.scrollContainer}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* All sounds tab */}
+          {activeTab === 'all' && (
+            <>
+              {/* Categories */}
+              {categories.map((category) => (
+                <View key={category.id} style={styles.categorySection}>
+                  {/* Category header */}
+                  <View style={styles.categoryHeader}>
+                    <View style={styles.categoryTitleContainer}>
+                      <Ionicons
+                        name={category.icon as any}
+                        size={20}
+                        color={theme.colors.text}
+                        style={styles.categoryIcon}
+                      />
+                      <H3>{category.title}</H3>
+                    </View>
+                    <Body2>{category.sounds.length}個のサウンド</Body2>
+                  </View>
+                  
+                  {/* Sounds */}
+                  {category.sounds.map((sound) => (
+                    <SoundCard
+                      key={sound.id}
+                      sound={sound}
+                      soundInstance={playingSounds[sound.id]}
+                      isPlaying={!!playingSounds[sound.id]}
+                      onPlayToggle={() => handlePlayToggle(sound)}
+                      onVolumeChange={(volume) => handleVolumeChange(sound.id, volume)}
+                      isFavorite={favoriteSounds.includes(sound.id)}
+                      onToggleFavorite={() => handleToggleFavorite(sound.id)}
+                      isPremiumUser={isPremium}
+                      testID={`sound-${sound.id}`}
                     />
                   ))}
-                </ScrollView>
-              )}
-            </View>
-            
-            {/* Playing Sounds */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.playingSoundsContainer}
-            >
-              {Array.from(playingSounds.keys()).map((soundId) => {
-                const soundItem = sounds.find(s => s.id === soundId);
-                if (!soundItem) return null;
-                
-                return (
-                  <View key={`playing-${soundId}`} style={styles.playingSoundItem}>
-                    <SoundCard
-                      sound={soundItem}
-                      soundInstance={playingSounds.get(soundId)}
-                      isPlaying={true}
-                      onPlayToggle={() => handlePlayToggle(soundItem)}
-                      onVolumeChange={(volume) => handleVolumeChange(soundId, volume)}
-                      isFavorite={favorites.includes(soundId)}
-                      onToggleFavorite={() => handleToggleFavorite(soundId)}
-                      isPremiumUser={isPremium}
-                      size="small"
-                    />
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </Card>
-        )}
-        
-        {/* Categories */}
-        <View style={styles.categoriesContainer}>
-          <FlatList
-            data={[
-              { id: 'all', label: 'すべて', icon: 'apps-outline' },
-              { id: SoundCategory.NATURE, label: '自然', icon: 'leaf-outline' },
-              { id: SoundCategory.AMBIENT, label: '環境音', icon: 'cafe-outline' },
-              { id: SoundCategory.MUSIC, label: '音楽', icon: 'musical-notes-outline' },
-              { id: SoundCategory.BINAURAL, label: 'バイノーラル', icon: 'pulse-outline' },
-              { id: SoundCategory.WHITE_NOISE, label: 'ホワイトノイズ', icon: 'radio-outline' },
-            ]}
-            renderItem={renderCategoryItem}
-            keyExtractor={(item) => item.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.categoriesList}
-          />
-        </View>
-        
-        {/* Favorites */}
-        {favoriteSounds.length > 0 && selectedCategory === 'all' && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <H3>お気に入り</H3>
-            </View>
-            
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalList}
-            >
-              {favoriteSounds.map((sound) => (
-                <View key={`favorite-${sound.id}`} style={styles.horizontalItem}>
+                </View>
+              ))}
+            </>
+          )}
+          
+          {/* Favorites tab */}
+          {activeTab === 'favorites' && (
+            <View style={styles.favoritesSection}>
+              {getFavoriteSounds().length === 0 ? (
+                <Card style={styles.emptyCard}>
+                  <Body1 align="center">
+                    お気に入りに追加したサウンドはまだありません。
+                  </Body1>
+                </Card>
+              ) : (
+                getFavoriteSounds().map((sound) => (
                   <SoundCard
+                    key={sound.id}
                     sound={sound}
-                    soundInstance={playingSounds.get(sound.id)}
-                    isPlaying={playingSounds.has(sound.id)}
+                    soundInstance={playingSounds[sound.id]}
+                    isPlaying={!!playingSounds[sound.id]}
                     onPlayToggle={() => handlePlayToggle(sound)}
                     onVolumeChange={(volume) => handleVolumeChange(sound.id, volume)}
                     isFavorite={true}
                     onToggleFavorite={() => handleToggleFavorite(sound.id)}
                     isPremiumUser={isPremium}
-                    size="small"
+                    testID={`favorite-sound-${sound.id}`}
                   />
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-        
-        {/* Sound List */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <H3>
-              {selectedCategory === 'all' 
-                ? 'すべてのサウンド' 
-                : selectedCategory === SoundCategory.NATURE ? '自然'
-                : selectedCategory === SoundCategory.AMBIENT ? '環境音'
-                : selectedCategory === SoundCategory.MUSIC ? '音楽'
-                : selectedCategory === SoundCategory.BINAURAL ? 'バイノーラル'
-                : selectedCategory === SoundCategory.WHITE_NOISE ? 'ホワイトノイズ'
-                : 'サウンド'}
-            </H3>
-            <Body2>{filteredSounds.length}個のサウンド</Body2>
-          </View>
-          
-          {filteredSounds.length === 0 ? (
-            <Card style={styles.emptyCard}>
-              <Body1 align="center">
-                この種類のサウンドはまだありません。
-              </Body1>
-            </Card>
-          ) : (
-            filteredSounds.map((sound) => (
-              <SoundCard
-                key={`sound-${sound.id}`}
-                sound={sound}
-                soundInstance={playingSounds.get(sound.id)}
-                isPlaying={playingSounds.has(sound.id)}
-                onPlayToggle={() => handlePlayToggle(sound)}
-                onVolumeChange={(volume) => handleVolumeChange(sound.id, volume)}
-                isFavorite={favorites.includes(sound.id)}
-                onToggleFavorite={() => handleToggleFavorite(sound.id)}
-                isPremiumUser={isPremium}
-                size="medium"
-              />
-            ))
+                ))
+              )}
+            </View>
           )}
-        </View>
-        
-        {/* Premium Upsell */}
-        {!isPremium && (
-          <Card 
-            style={styles.premiumCard} 
-            backgroundColor={theme.colors.secondaryContainer}
-          >
-            <View style={styles.premiumCardContent}>
+          
+          {/* Info card */}
+          <Card style={styles.infoCard}>
+            <View style={styles.infoCardContent}>
               <Ionicons
-                name="star"
+                name="information-circle-outline"
                 size={24}
-                color={theme.colors.secondary}
-                style={styles.premiumIcon}
+                color={theme.colors.primary}
+                style={styles.infoIcon}
               />
-              <View style={styles.premiumTextContainer}>
-                <Subtitle1 weight="medium">プレミアム会員になる</Subtitle1>
+              <Body1>
+                サウンドはバックグラウンドでも再生され、他のアプリを使用中や画面をロックしていても聞くことができます。
+              </Body1>
+            </View>
+          </Card>
+          
+          {/* Premium Upsell */}
+          {!isPremium && (
+            <Card 
+              style={styles.premiumCard} 
+              backgroundColor={theme.colors.secondaryContainer}
+            >
+              <View style={styles.premiumCardContent}>
+                <Ionicons
+                  name="star"
+                  size={24}
+                  color={theme.colors.secondary}
+                  style={styles.premiumIcon}
+                />
+                <View style={styles.premiumTextContainer}>
+                  <Subtitle1 weight="medium">プレミアム会員になる</Subtitle1>
+                  <Body1>
+                    すべてのサウンドにアクセスしてカスタムミックスを作成できます。
+                  </Body1>
+                </View>
+              </View>
+            </Card>
+          )}
+        </ScrollView>
+        
+        {/* Playing indicator */}
+        {Object.keys(playingSounds).length > 0 && (
+          <Card 
+            style={styles.playingBar}
+            elevation="medium"
+          >
+            <View style={styles.playingContent}>
+              <View style={styles.playingInfo}>
+                <Ionicons
+                  name="musical-notes"
+                  size={20}
+                  color={theme.colors.primary}
+                  style={styles.playingIcon}
+                />
                 <Body1>
-                  すべてのサウンドと機能にアクセスできます。
+                  {Object.keys(playingSounds).length}個のサウンドを再生中
                 </Body1>
               </View>
+              
+              <TouchableOpacity
+                style={styles.stopButton}
+                onPress={stopAllSounds}
+              >
+                <Ionicons
+                  name="stop-circle-outline"
+                  size={28}
+                  color={theme.colors.error}
+                />
+              </TouchableOpacity>
             </View>
           </Card>
         )}
@@ -597,112 +464,81 @@ export default function SoundsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 16,
   },
   header: {
-    marginBottom: 20,
+    padding: 16,
+    paddingBottom: 0,
   },
   subtitle: {
     marginTop: 4,
     opacity: 0.8,
   },
-  categoriesContainer: {
-    marginBottom: 20,
-  },
-  categoriesList: {
-    paddingVertical: 8,
-  },
-  categoryItem: {
+  tabSelector: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.05)',
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginRight: 8,
-  },
-  categoryIcon: {
-    marginRight: 6,
-  },
-  categoryLabel: {
-    fontSize: 14,
-  },
-  nowPlayingCard: {
-    marginBottom: 20,
-  },
-  nowPlayingHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-  },
-  masterVolumeContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  volumeSliderContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  volumeSlider: {
-    flex: 1,
-    height: 40,
-    marginLeft: 8,
-  },
-  timerContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  timerButtonsContainer: {
-    marginTop: 8,
-    paddingRight: 8,
-  },
-  timerButton: {
-    marginRight: 8,
-  },
-  activeTimerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  timerDisplay: {
-    fontFamily: 'NotoSansJP-Medium',
-    marginRight: 8,
-  },
-  stopTimerButton: {
+    marginTop: 16,
+    marginBottom: 8,
+    backgroundColor: theme.colors.surfaceVariant,
+    borderRadius: 24,
     padding: 4,
   },
-  playingSoundsContainer: {
+  tab: {
+    flex: 1,
+    paddingVertical: 8,
     paddingHorizontal: 16,
-    paddingBottom: 16,
+    borderRadius: 20,
+    alignItems: 'center',
   },
-  playingSoundItem: {
-    width: 200,
-    marginRight: 12,
+  activeTab: {
+    backgroundColor: theme.colors.primary,
   },
-  section: {
+  tabText: {
+    color: theme.colors.text,
+  },
+  activeTabText: {
+    color: theme.colors.background,
+    fontFamily: 'NotoSansJP-Medium',
+  },
+  scrollContent: {
+    flex: 1,
+  },
+  scrollContainer: {
+    padding: 16,
+    paddingBottom: 100, // Extra padding for bottom bar
+  },
+  categorySection: {
     marginBottom: 24,
   },
-  sectionHeader: {
+  categoryHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
   },
-  horizontalList: {
-    paddingVertical: 4,
+  categoryTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  horizontalItem: {
-    width: 200,
-    marginRight: 12,
+  categoryIcon: {
+    marginRight: 8,
+  },
+  favoritesSection: {
+    marginBottom: 24,
   },
   emptyCard: {
     padding: 24,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  infoCard: {
+    marginBottom: 16,
+  },
+  infoCardContent: {
+    flexDirection: 'row',
+    padding: 16,
+    alignItems: 'center',
+  },
+  infoIcon: {
+    marginRight: 16,
   },
   premiumCard: {
     marginBottom: 24,
@@ -717,6 +553,29 @@ const styles = StyleSheet.create({
   },
   premiumTextContainer: {
     flex: 1,
+  },
+  playingBar: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    right: 16,
+    borderRadius: 16,
+  },
+  playingContent: {
+    flexDirection: 'row',
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  playingInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  playingIcon: {
+    marginRight: 8,
+  },
+  stopButton: {
+    padding: 4,
   },
   loadingContainer: {
     flex: 1,
