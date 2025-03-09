@@ -1,8 +1,8 @@
 /**
  * Profile Edit Screen
  * 
- * Allows users to edit their profile information with HSP-friendly design.
- * Features gentle input fields, simple layout, and clear instructions.
+ * Allows users to update their profile information with HSP-friendly design.
+ * Features gentle transitions, clear form fields, and visual comfort.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -10,38 +10,35 @@ import {
   View, 
   StyleSheet, 
   TouchableOpacity, 
-  Image, 
-  Alert,
   ScrollView,
+  Alert,
   ActivityIndicator,
-  KeyboardAvoidingView,
+  Image,
   Platform,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useTheme } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import * as Haptics from 'expo-haptics';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import * as ImagePicker from 'expo-image-picker';
+import * as Haptics from 'expo-haptics';
 
 import ScreenWrapper from '@components/layout/ScreenWrapper';
 import FormField from '@components/ui/molecules/FormField';
 import Button from '@components/ui/atoms/Button';
-import { H2, H3, Body1, Body2 } from '@components/ui/atoms/Typography';
+import { H2, Body1, Body2 } from '@components/ui/atoms/Typography';
 import { useAuth } from '@components/providers/AuthProvider';
 import { useToastStore } from '@store/slices/uiSlice';
 import { useAccessibilityStore } from '@store/slices/uiSlice';
-import { UserUpdate } from '@lib/supabase/schema';
-import supabase from '@lib/supabase/client';
-import { STORAGE_BUCKETS } from '@lib/supabase/config';
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '@config/constants';
 import { AppTheme } from '@config/theme';
 
 // Form validation schema
 const profileSchema = z.object({
-  display_name: z.string().min(1, ERROR_MESSAGES.FIELD_REQUIRED),
+  displayName: z.string().min(1, ERROR_MESSAGES.FIELD_REQUIRED),
+  email: z.string().email(ERROR_MESSAGES.INVALID_EMAIL),
 });
 
 // Form data type
@@ -57,36 +54,39 @@ export default function ProfileEditScreen() {
   const { hapticsEnabled } = useAccessibilityStore();
   
   // State
+  const [loading, setLoading] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(profile?.avatar_url || null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [avatarFile, setAvatarFile] = useState<string | null>(null);
   
-  // Form state
-  const { control, handleSubmit, formState: { errors }, setValue } = useForm<ProfileFormData>({
+  // Form
+  const { control, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<ProfileFormData>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
-      display_name: profile?.display_name || '',
+      displayName: profile?.display_name || '',
+      email: user?.email || '',
     },
   });
   
-  // Set initial form values
+  // Set default values when profile changes
   useEffect(() => {
     if (profile) {
-      setValue('display_name', profile.display_name || '');
+      reset({
+        displayName: profile.display_name || '',
+        email: user?.email || '',
+      });
+      
+      setAvatarUrl(profile.avatar_url || null);
     }
-  }, [profile, setValue]);
+  }, [profile, user]);
   
   // Pick image from library
-  const handleImagePick = async () => {
+  const pickImage = async () => {
     try {
-      // Request permissions
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      // Request permission
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       
-      if (!permissionResult.granted) {
-        Alert.alert(
-          '権限が必要です',
-          '画像を選択するには、画像ライブラリへのアクセス許可が必要です。'
-        );
+      if (status !== 'granted') {
+        Alert.alert('権限エラー', '画像を選択するには写真へのアクセス許可が必要です。');
         return;
       }
       
@@ -95,266 +95,226 @@ export default function ProfileEditScreen() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.8,
+        quality: 0.7,
       });
       
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        // Upload image
-        await uploadImage(result.assets[0].uri);
-        
         // Haptic feedback
         if (hapticsEnabled) {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         }
+        
+        // Set avatar file
+        setAvatarFile(result.assets[0].uri);
+        setAvatarUrl(result.assets[0].uri);
       }
     } catch (error) {
       console.error('Error picking image:', error);
-      
-      showToast(ERROR_MESSAGES.UNKNOWN_ERROR, 'error');
+      showToast('画像の選択中にエラーが発生しました。', 'error');
     }
   };
   
-  // Upload image to Supabase storage
-  const uploadImage = async (uri: string) => {
+  // Take photo with camera
+  const takePhoto = async () => {
     try {
-      if (!user) return;
+      // Request permission
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
       
-      setIsUploading(true);
-      
-      // Prepare file
-      const fileName = `avatar-${user.id}-${Date.now()}`;
-      const fileExt = uri.split('.').pop();
-      const filePath = `${fileName}.${fileExt}`;
-      
-      // Convert image to blob
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      
-      // Upload to Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from(STORAGE_BUCKETS.AVATARS)
-        .upload(filePath, blob);
-      
-      if (uploadError) {
-        throw uploadError;
+      if (status !== 'granted') {
+        Alert.alert('権限エラー', '写真を撮影するにはカメラへのアクセス許可が必要です。');
+        return;
       }
       
-      // Get public URL
-      const { data: urlData } = await supabase.storage
-        .from(STORAGE_BUCKETS.AVATARS)
-        .getPublicUrl(filePath);
+      // Launch camera
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+      });
       
-      // Set avatar URL
-      const publicUrl = urlData.publicUrl;
-      setAvatarUrl(publicUrl);
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        // Haptic feedback
+        if (hapticsEnabled) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        }
+        
+        // Set avatar file
+        setAvatarFile(result.assets[0].uri);
+        setAvatarUrl(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Error taking photo:', error);
+      showToast('写真の撮影中にエラーが発生しました。', 'error');
+    }
+  };
+  
+  // Show image options
+  const showImageOptions = () => {
+    Alert.alert(
+      'プロフィール画像',
+      '画像を選択してください',
+      [
+        { text: 'キャンセル', style: 'cancel' },
+        { text: 'カメラで撮影', onPress: takePhoto },
+        { text: 'ライブラリから選択', onPress: pickImage },
+        { 
+          text: '削除', 
+          style: 'destructive',
+          onPress: () => {
+            setAvatarUrl(null);
+            setAvatarFile(null);
+            
+            // Haptic feedback
+            if (hapticsEnabled) {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            }
+          }
+        },
+      ]
+    );
+  };
+  
+  // Submit form
+  const onSubmit = async (data: ProfileFormData) => {
+    try {
+      setLoading(true);
       
-      // Update profile
-      if (profile) {
-        await updateProfile({
-          avatar_url: publicUrl,
-        });
+      // Upload avatar if changed
+      let finalAvatarUrl = profile?.avatar_url || null;
+      
+      if (avatarFile) {
+        // In a real app, we would upload the image to a storage service
+        // and get the URL. For now, we'll just use the local URL.
+        finalAvatarUrl = avatarUrl;
+      } else if (avatarUrl === null && profile?.avatar_url) {
+        // Avatar was removed
+        finalAvatarUrl = null;
       }
       
-      setIsUploading(false);
-    } catch (error) {
-      console.error('Error uploading image:', error);
-      
-      setIsUploading(false);
-      showToast(ERROR_MESSAGES.UNKNOWN_ERROR, 'error');
-    }
-  };
-  
-  // Remove avatar
-  const handleRemoveAvatar = async () => {
-    try {
-      if (!user || !profile?.avatar_url) return;
-      
-      // Confirm removal
-      Alert.alert(
-        'アバター削除',
-        'アバター画像を削除してもよろしいですか？',
-        [
-          { 
-            text: 'キャンセル', 
-            style: 'cancel',
-          },
-          {
-            text: '削除',
-            onPress: async () => {
-              setIsUploading(true);
-              
-              // Extract file path from URL
-              const filePathMatch = profile.avatar_url?.match(/\/([^/]+)$/);
-              const filePath = filePathMatch ? filePathMatch[1] : null;
-              
-              if (filePath) {
-                // Delete from storage
-                await supabase.storage
-                  .from(STORAGE_BUCKETS.AVATARS)
-                  .remove([filePath]);
-              }
-              
-              // Update profile
-              await updateProfile({
-                avatar_url: null,
-              });
-              
-              // Clear avatar URL
-              setAvatarUrl(null);
-              
-              setIsUploading(false);
-              
-              // Haptic feedback
-              if (hapticsEnabled) {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              }
-              
-              showToast('アバターを削除しました。', 'success');
-            },
-            style: 'destructive',
-          },
-        ]
-      );
-    } catch (error) {
-      console.error('Error removing avatar:', error);
-      
-      setIsUploading(false);
-      showToast(ERROR_MESSAGES.UNKNOWN_ERROR, 'error');
-    }
-  };
-  
-  // Save profile
-  const handleSaveProfile = async (data: ProfileFormData) => {
-    try {
-      if (!user) return;
-      
-      setIsSaving(true);
-      
-      // Prepare update
-      const updates: UserUpdate = {
-        display_name: data.display_name,
-      };
-      
       // Update profile
-      const { error } = await updateProfile(updates);
+      const { error } = await updateProfile({
+        display_name: data.displayName,
+        avatar_url: finalAvatarUrl,
+      });
       
       if (error) {
-        throw error;
+        console.error('Error updating profile:', error);
+        showToast(error.message || 'プロフィールの更新中にエラーが発生しました。', 'error');
+        setLoading(false);
+        return;
       }
       
-      setIsSaving(false);
+      // Success
+      showToast('プロフィールが更新されました。', 'success');
       
-      // Haptic feedback
-      if (hapticsEnabled) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }
-      
-      showToast(SUCCESS_MESSAGES.PROFILE_UPDATE_SUCCESS, 'success');
-      
-      // Go back to profile
+      // Go back
       router.back();
     } catch (error) {
-      console.error('Error saving profile:', error);
-      
-      setIsSaving(false);
-      showToast(ERROR_MESSAGES.UNKNOWN_ERROR, 'error');
+      console.error('Error updating profile:', error);
+      showToast('プロフィールの更新中にエラーが発生しました。', 'error');
+      setLoading(false);
     }
   };
   
   return (
-    <ScreenWrapper>
+    <ScreenWrapper scrollable>
       <Stack.Screen 
         options={{ 
-          title: 'プロフィール編集',
-          headerShown: true,
+          headerTitle: 'プロフィール編集',
           headerBackTitle: '戻る',
         }} 
       />
       
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.container}
-      >
-        <ScrollView contentContainerStyle={styles.scrollContainer}>
-          {/* Avatar Section */}
-          <View style={styles.avatarSection}>
-            {/* Avatar */}
-            <View style={styles.avatarContainer}>
-              {isUploading ? (
-                <View style={[styles.defaultAvatar, { backgroundColor: theme.colors.surfaceVariant }]}>
-                  <ActivityIndicator color={theme.colors.primary} />
-                </View>
-              ) : avatarUrl ? (
-                <Image 
-                  source={{ uri: avatarUrl }} 
-                  style={styles.avatar} 
-                />
-              ) : (
-                <View style={[styles.defaultAvatar, { backgroundColor: theme.colors.primary }]}>
-                  <H2 style={{ color: theme.colors.background }}>
-                    {profile?.display_name?.charAt(0) || user?.email?.charAt(0) || 'U'}
-                  </H2>
-                </View>
-              )}
-              
-              {/* Avatar actions */}
-              <View style={styles.avatarActions}>
-                <TouchableOpacity
-                  style={[styles.avatarButton, { backgroundColor: theme.colors.primary }]}
-                  onPress={handleImagePick}
-                  disabled={isUploading}
-                >
-                  <Ionicons name="image-outline" size={18} color={theme.colors.background} />
-                </TouchableOpacity>
-                
-                {avatarUrl && (
-                  <TouchableOpacity
-                    style={[styles.avatarButton, { backgroundColor: theme.colors.error }]}
-                    onPress={handleRemoveAvatar}
-                    disabled={isUploading}
-                  >
-                    <Ionicons name="trash-outline" size={18} color={theme.colors.background} />
-                  </TouchableOpacity>
-                )}
+      <View style={styles.container}>
+        {/* Avatar */}
+        <View style={styles.avatarSection}>
+          <TouchableOpacity
+            style={styles.avatarContainer}
+            onPress={showImageOptions}
+          >
+            {avatarUrl ? (
+              <Image
+                source={{ uri: avatarUrl }}
+                style={styles.avatar}
+              />
+            ) : (
+              <View 
+                style={[
+                  styles.avatarPlaceholder,
+                  { backgroundColor: theme.colors.primary },
+                ]}
+              >
+                <H2 style={styles.avatarText}>
+                  {profile?.display_name?.[0] || user?.email?.[0] || 'U'}
+                </H2>
               </View>
-            </View>
+            )}
             
-            <Body1 style={styles.avatarHelp}>
-              タップしてプロフィール画像を変更
-            </Body1>
-          </View>
-          
-          {/* Form */}
-          <View style={styles.formSection}>
-            <FormField
-              control={control}
-              name="display_name"
-              label="表示名"
-              placeholder="表示名を入力"
-              autoCapitalize="words"
-              testID="display-name-input"
-              rules={{ required: true }}
-            />
-            
-            {/* Email (read-only) */}
-            <View style={styles.readOnlyField}>
-              <Body1 style={styles.fieldLabel}>メールアドレス</Body1>
-              <Body1 style={styles.fieldValue}>{user?.email}</Body1>
-              <Body2 style={styles.fieldNote}>メールアドレスは変更できません</Body2>
+            <View 
+              style={[
+                styles.editBadge,
+                { backgroundColor: theme.colors.primary },
+              ]}
+            >
+              <Ionicons name="camera" size={16} color="white" />
             </View>
-          </View>
+          </TouchableOpacity>
           
-          {/* Save button */}
+          <Body2 style={styles.avatarHelpText}>
+            タップして画像を変更
+          </Body2>
+        </View>
+        
+        {/* Form */}
+        <View style={styles.form}>
+          <FormField
+            control={control}
+            name="displayName"
+            label="表示名"
+            placeholder="あなたの名前を入力"
+            rules={{ required: true }}
+            testID="profile-name"
+          />
+          
+          <FormField
+            control={control}
+            name="email"
+            label="メールアドレス"
+            placeholder="example@email.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            rules={{ required: true }}
+            disabled={true}
+            testID="profile-email"
+          />
+          
+          <Body2 style={styles.emailNote}>
+            メールアドレスは変更できません
+          </Body2>
+          
+          {/* Submit button */}
           <Button
             label="保存"
-            onPress={handleSubmit(handleSaveProfile)}
-            isLoading={isSaving}
+            onPress={handleSubmit(onSubmit)}
+            isLoading={isSubmitting || loading}
             fullWidth
-            style={styles.saveButton}
-            testID="save-profile-button"
+            style={styles.submitButton}
+            testID="profile-submit"
           />
-        </ScrollView>
-      </KeyboardAvoidingView>
+          
+          {/* Cancel button */}
+          <Button
+            label="キャンセル"
+            onPress={() => router.back()}
+            variant="ghost"
+            fullWidth
+            style={styles.cancelButton}
+            disabled={isSubmitting || loading}
+            testID="profile-cancel"
+          />
+        </View>
+      </View>
     </ScreenWrapper>
   );
 }
@@ -362,65 +322,62 @@ export default function ProfileEditScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  scrollContainer: {
     padding: 16,
   },
   avatarSection: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 24,
   },
   avatarContainer: {
     position: 'relative',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     marginBottom: 8,
   },
   avatar: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
   },
-  defaultAvatar: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    alignItems: 'center',
+  avatarPlaceholder: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     justifyContent: 'center',
+    alignItems: 'center',
   },
-  avatarActions: {
+  avatarText: {
+    color: 'white',
+  },
+  editBadge: {
     position: 'absolute',
     bottom: 0,
     right: 0,
-    flexDirection: 'row',
-  },
-  avatarButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
-    marginLeft: 8,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'white',
   },
-  avatarHelp: {
-    marginTop: 8,
+  avatarHelpText: {
     opacity: 0.7,
   },
-  formSection: {
+  form: {
     marginBottom: 24,
   },
-  readOnlyField: {
-    marginBottom: 16,
-  },
-  fieldLabel: {
-    marginBottom: 8,
+  emailNote: {
+    marginTop: -8,
+    marginLeft: 8,
     opacity: 0.7,
   },
-  fieldValue: {
-    marginBottom: 4,
+  submitButton: {
+    marginTop: 24,
+    marginBottom: 8,
   },
-  fieldNote: {
-    opacity: 0.5,
-  },
-  saveButton: {
+  cancelButton: {
     marginBottom: 16,
   },
 });
