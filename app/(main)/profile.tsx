@@ -357,7 +357,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   header: {
-    marginBottom:, 20,
+    marginBottom: 20,
   },
   subtitle: {
     marginTop: 4,
