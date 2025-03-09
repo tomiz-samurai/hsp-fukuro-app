@@ -1,11 +1,11 @@
 /**
  * Sounds Screen
  * 
- * Browse and play various soothing sounds with HSP-friendly design.
- * Features categories of ambient sounds for relaxation and focus.
+ * Browse and play various ambient sounds with HSP-friendly design.
+ * Features categorized sound collections with playback controls.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
   StyleSheet, 
@@ -13,12 +13,13 @@ import {
   TouchableOpacity, 
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { useRouter, useSearchParams, Stack } from 'expo-router';
 import { useTheme } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { Audio } from 'expo-av';
+import { StatusBar } from 'expo-status-bar';
 
 import ScreenWrapper from '@components/layout/ScreenWrapper';
 import Card from '@components/ui/molecules/Card';
@@ -27,21 +28,16 @@ import { H2, H3, Body1, Body2, Subtitle1 } from '@components/ui/atoms/Typography
 import { useAuth } from '@components/providers/AuthProvider';
 import { useAuthStore } from '@store/slices/authSlice';
 import { useAccessibilityStore } from '@store/slices/uiSlice';
-import { 
-  SoundService, 
-  SoundItem, 
-  SoundCategory, 
-  SoundInstance
-} from '@services/sound.service';
+import { SoundService, SoundItem, SoundCategory, SoundInstance } from '@services/sound.service';
 import { AppTheme } from '@config/theme';
 
-// Sound category data
+// Sound categories data
 const CATEGORIES = [
   { id: 'all', label: 'すべて', icon: 'apps-outline' },
   { id: SoundCategory.NATURE, label: '自然', icon: 'leaf-outline' },
   { id: SoundCategory.AMBIENT, label: '環境音', icon: 'cafe-outline' },
-  { id: SoundCategory.WHITE_NOISE, label: 'ホワイトノイズ', icon: 'radio-outline' },
   { id: SoundCategory.MUSIC, label: '音楽', icon: 'musical-notes-outline' },
+  { id: SoundCategory.WHITE_NOISE, label: 'ホワイトノイズ', icon: 'radio-outline' },
   { id: SoundCategory.BINAURAL, label: 'バイノーラル', icon: 'pulse-outline' },
 ];
 
@@ -61,20 +57,40 @@ export default function SoundsScreen() {
   // State
   const [selectedCategory, setSelectedCategory] = useState<string>(categoryParam);
   const [sounds, setSounds] = useState<SoundItem[]>([]);
-  const [loadedSounds, setLoadedSounds] = useState<Map<string, SoundInstance>>(new Map());
-  const [playingSounds, setPlayingSounds] = useState<Set<string>>(new Set());
+  const [loadedSounds, setLoadedSounds] = useState<Record<string, SoundInstance>>({});
+  const [playingSounds, setPlayingSounds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [favorites, setFavorites] = useState<string[]>([]);
+  
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      // Unload all sounds when component unmounts
+      SoundService.unloadAll();
+    };
+  }, []);
   
   // Fetch sound data
   useEffect(() => {
     loadSounds();
-    
-    // Cleanup function
-    return () => {
-      unloadAllSounds();
-    };
+    setupAudioSession();
   }, [isPremium]);
+  
+  // Setup audio session
+  const setupAudioSession = async () => {
+    try {
+      await Audio.setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        interruptionModeIOS: Audio.InterruptionModeIOS.DuckOthers,
+        interruptionModeAndroid: Audio.InterruptionModeAndroid.DuckOthers,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+    } catch (error) {
+      console.error('Error setting audio mode:', error);
+    }
+  };
   
   // Load sounds
   const loadSounds = async () => {
@@ -85,36 +101,13 @@ export default function SoundsScreen() {
       const allSounds = await SoundService.getSounds(isPremium);
       setSounds(allSounds);
       
-      // If user is logged in, get favorites
-      if (user?.id) {
-        const userFavorites = await SoundService.getFavorites(user.id);
-        setFavorites(userFavorites.map(fav => fav.sound_id));
-      } else {
-        // Mock favorites for now
-        setFavorites(['nature-rain', 'white-noise-fan']);
-      }
+      // Mock favorites for now
+      setFavorites(['nature-rain', 'nature-ocean']);
       
       setLoading(false);
     } catch (error) {
       console.error('Error loading sounds:', error);
       setLoading(false);
-      
-      Alert.alert(
-        'エラー',
-        'サウンドデータの取得に失敗しました。',
-        [{ text: 'OK' }]
-      );
-    }
-  };
-  
-  // Unload all sounds on unmount
-  const unloadAllSounds = async () => {
-    try {
-      await SoundService.unloadAll();
-      setLoadedSounds(new Map());
-      setPlayingSounds(new Set());
-    } catch (error) {
-      console.error('Error unloading sounds:', error);
     }
   };
   
@@ -134,139 +127,81 @@ export default function SoundsScreen() {
     }
   };
   
-  // Toggle sound play/pause
-  const handleTogglePlaySound = async (sound: SoundItem) => {
+  // Toggle sound playback
+  const handleTogglePlay = async (soundId: string) => {
     try {
-      if (hapticsEnabled) {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      }
-      
-      const soundId = sound.id;
-      
-      // Check if sound is playing
-      if (playingSounds.has(soundId)) {
+      if (playingSounds.includes(soundId)) {
         // Pause sound
         await SoundService.pauseSound(soundId);
         
-        // Update state
-        setPlayingSounds(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(soundId);
-          return newSet;
-        });
+        // Update playing sounds list
+        setPlayingSounds((prev) => prev.filter(id => id !== soundId));
       } else {
-        // Check if sound is already loaded
-        let soundInstance = loadedSounds.get(soundId);
+        // Play sound
+        let soundInstance = loadedSounds[soundId];
         
         if (!soundInstance) {
-          // Load sound
+          // Load sound if not already loaded
           soundInstance = await SoundService.loadSound(soundId, isPremium);
           
           if (soundInstance) {
             // Update loaded sounds
-            setLoadedSounds(prev => {
-              const newMap = new Map(prev);
-              newMap.set(soundId, soundInstance!);
-              return newMap;
-            });
-          } else {
-            // Failed to load sound
-            Alert.alert(
-              'エラー',
-              'サウンドの読み込みに失敗しました。',
-              [{ text: 'OK' }]
-            );
-            return;
+            setLoadedSounds((prev) => ({
+              ...prev,
+              [soundId]: soundInstance!,
+            }));
           }
         }
         
-        // Play sound
-        await SoundService.playSound(soundId, isPremium);
-        
-        // Update state
-        setPlayingSounds(prev => {
-          const newSet = new Set(prev);
-          newSet.add(soundId);
-          return newSet;
-        });
+        if (soundInstance) {
+          // Play sound
+          await SoundService.playSound(soundId, isPremium);
+          
+          // Update playing sounds list
+          setPlayingSounds((prev) => [...prev, soundId]);
+          
+          // Haptic feedback
+          if (hapticsEnabled) {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          }
+        }
       }
     } catch (error) {
       console.error('Error toggling sound playback:', error);
-      
-      Alert.alert(
-        'エラー',
-        'サウンドの再生に失敗しました。',
-        [{ text: 'OK' }]
-      );
     }
   };
   
-  // Handle volume change
+  // Change sound volume
   const handleVolumeChange = async (soundId: string, volume: number) => {
     try {
       await SoundService.setVolume(soundId, volume);
       
-      // Update loaded sound instance
-      setLoadedSounds(prev => {
-        const newMap = new Map(prev);
-        const instance = newMap.get(soundId);
-        
-        if (instance) {
-          instance.volume = volume;
-          newMap.set(soundId, instance);
-        }
-        
-        return newMap;
-      });
+      // Update loaded sounds with new volume
+      setLoadedSounds((prev) => ({
+        ...prev,
+        [soundId]: {
+          ...prev[soundId],
+          volume,
+        },
+      }));
     } catch (error) {
       console.error('Error changing volume:', error);
     }
   };
   
   // Toggle favorite status
-  const handleToggleFavorite = async (soundId: string) => {
+  const handleToggleFavorite = (soundId: string) => {
     if (hapticsEnabled) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     
-    if (!user?.id) {
-      // If user is not logged in, show sign-in prompt
-      Alert.alert(
-        'ログインが必要です',
-        'お気に入り機能を使用するにはログインが必要です。',
-        [
-          { text: 'キャンセル', style: 'cancel' },
-          { text: 'ログイン', onPress: () => router.push('/login') },
-        ]
-      );
-      return;
-    }
-    
-    try {
-      if (favorites.includes(soundId)) {
-        // Remove from favorites
-        await SoundService.removeFavorite(user.id, soundId);
-        
-        setFavorites(prev => prev.filter(id => id !== soundId));
+    setFavorites((prev) => {
+      if (prev.includes(soundId)) {
+        return prev.filter(id => id !== soundId);
       } else {
-        // Add to favorites
-        await SoundService.addFavorite({
-          user_id: user.id,
-          sound_id: soundId,
-          custom_name: null,
-        });
-        
-        setFavorites(prev => [...prev, soundId]);
+        return [...prev, soundId];
       }
-    } catch (error) {
-      console.error('Error toggling favorite:', error);
-      
-      Alert.alert(
-        'エラー',
-        'お気に入りの更新に失敗しました。',
-        [{ text: 'OK' }]
-      );
-    }
+    });
   };
   
   // Filtered sounds based on selected category
@@ -305,6 +240,22 @@ export default function SoundsScreen() {
     </TouchableOpacity>
   );
   
+  // Render sound item
+  const renderSoundItem = ({ item }: { item: SoundItem }) => (
+    <SoundCard
+      sound={item}
+      soundInstance={loadedSounds[item.id]}
+      isPlaying={playingSounds.includes(item.id)}
+      onPlayToggle={() => handleTogglePlay(item.id)}
+      onVolumeChange={(volume) => handleVolumeChange(item.id, volume)}
+      isPremiumUser={isPremium}
+      isFavorite={favorites.includes(item.id)}
+      onToggleFavorite={() => handleToggleFavorite(item.id)}
+      size="medium"
+      testID={`sound-${item.id}`}
+    />
+  );
+  
   // Loading state
   if (loading) {
     return (
@@ -319,6 +270,7 @@ export default function SoundsScreen() {
   
   return (
     <ScreenWrapper scrollable>
+      <StatusBar style="auto" />
       <Stack.Screen options={{ headerShown: false }} />
       
       <View style={styles.container}>
@@ -326,7 +278,7 @@ export default function SoundsScreen() {
         <View style={styles.header}>
           <H2>サウンド</H2>
           <Body1 style={styles.subtitle}>
-            心を落ち着かせるリラクゼーションサウンド
+            リラックスのための環境音
           </Body1>
         </View>
         
@@ -342,68 +294,6 @@ export default function SoundsScreen() {
           />
         </View>
         
-        {/* Multi Sound Mixer Card */}
-        <Card 
-          style={styles.mixerCard} 
-          backgroundColor={theme.colors.secondaryContainer}
-        >
-          <View style={styles.mixerContent}>
-            <View style={styles.mixerIcon}>
-              <Ionicons
-                name="albums-outline"
-                size={24}
-                color={theme.colors.secondary}
-              />
-            </View>
-            <View style={styles.mixerTextContainer}>
-              <Subtitle1 weight="medium">サウンドミキサー</Subtitle1>
-              <Body1>
-                複数のサウンドを同時に再生して、カスタムサウンドスケープを作成できます。
-              </Body1>
-            </View>
-          </View>
-        </Card>
-        
-        {/* Currently Playing */}
-        {playingSounds.size > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <H3>再生中</H3>
-              <TouchableOpacity
-                onPress={() => {
-                  // Stop all playing sounds
-                  playingSounds.forEach(async (soundId) => {
-                    await SoundService.stopSound(soundId);
-                  });
-                  setPlayingSounds(new Set());
-                }}
-              >
-                <Body2 color={theme.colors.primary}>すべて停止</Body2>
-              </TouchableOpacity>
-            </View>
-            
-            {Array.from(playingSounds).map(soundId => {
-              const sound = sounds.find(s => s.id === soundId);
-              if (!sound) return null;
-              
-              return (
-                <SoundCard
-                  key={`playing-${sound.id}`}
-                  sound={sound}
-                  soundInstance={loadedSounds.get(sound.id)}
-                  isPlaying={true}
-                  onPlayToggle={() => handleTogglePlaySound(sound)}
-                  onVolumeChange={(volume) => handleVolumeChange(sound.id, volume)}
-                  isFavorite={favorites.includes(sound.id)}
-                  onToggleFavorite={() => handleToggleFavorite(sound.id)}
-                  isPremiumUser={isPremium}
-                  size="medium"
-                />
-              );
-            })}
-          </View>
-        )}
-        
         {/* Favorites */}
         {favoriteSounds.length > 0 && selectedCategory === 'all' && (
           <View style={styles.section}>
@@ -417,20 +307,51 @@ export default function SoundsScreen() {
               contentContainerStyle={styles.horizontalList}
             >
               {favoriteSounds.map((sound) => (
-                <View key={`favorite-${sound.id}`} style={styles.horizontalItem}>
+                <View key={sound.id} style={styles.horizontalItem}>
                   <SoundCard
                     sound={sound}
-                    soundInstance={loadedSounds.get(sound.id)}
-                    isPlaying={playingSounds.has(sound.id)}
-                    onPlayToggle={() => handleTogglePlaySound(sound)}
+                    soundInstance={loadedSounds[sound.id]}
+                    isPlaying={playingSounds.includes(sound.id)}
+                    onPlayToggle={() => handleTogglePlay(sound.id)}
+                    onVolumeChange={(volume) => handleVolumeChange(sound.id, volume)}
+                    isPremiumUser={isPremium}
                     isFavorite={true}
                     onToggleFavorite={() => handleToggleFavorite(sound.id)}
-                    isPremiumUser={isPremium}
                     size="small"
                   />
                 </View>
               ))}
             </ScrollView>
+          </View>
+        )}
+        
+        {/* Now Playing */}
+        {playingSounds.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <H3>再生中</H3>
+              <Body2>{playingSounds.length}個のサウンド</Body2>
+            </View>
+            
+            {playingSounds.map((soundId) => {
+              const sound = sounds.find(s => s.id === soundId);
+              if (!sound) return null;
+              
+              return (
+                <SoundCard
+                  key={sound.id}
+                  sound={sound}
+                  soundInstance={loadedSounds[sound.id]}
+                  isPlaying={true}
+                  onPlayToggle={() => handleTogglePlay(sound.id)}
+                  onVolumeChange={(volume) => handleVolumeChange(sound.id, volume)}
+                  isPremiumUser={isPremium}
+                  isFavorite={favorites.includes(sound.id)}
+                  onToggleFavorite={() => handleToggleFavorite(sound.id)}
+                  size="medium"
+                />
+              );
+            })}
           </View>
         )}
         
@@ -456,18 +377,36 @@ export default function SoundsScreen() {
               <SoundCard
                 key={sound.id}
                 sound={sound}
-                soundInstance={loadedSounds.get(sound.id)}
-                isPlaying={playingSounds.has(sound.id)}
-                onPlayToggle={() => handleTogglePlaySound(sound)}
+                soundInstance={loadedSounds[sound.id]}
+                isPlaying={playingSounds.includes(sound.id)}
+                onPlayToggle={() => handleTogglePlay(sound.id)}
                 onVolumeChange={(volume) => handleVolumeChange(sound.id, volume)}
+                isPremiumUser={isPremium}
                 isFavorite={favorites.includes(sound.id)}
                 onToggleFavorite={() => handleToggleFavorite(sound.id)}
-                isPremiumUser={isPremium}
                 size="medium"
               />
             ))
           )}
         </View>
+        
+        {/* Sound Mixer Info */}
+        <Card style={styles.mixerCard}>
+          <View style={styles.mixerCardContent}>
+            <Ionicons
+              name="information-circle-outline"
+              size={24}
+              color={theme.colors.primary}
+              style={styles.mixerIcon}
+            />
+            <View style={styles.mixerTextContainer}>
+              <Subtitle1 weight="medium">サウンドミキサー</Subtitle1>
+              <Body1>
+                複数の音を同時に再生して、あなた好みの環境音を作ることができます。
+              </Body1>
+            </View>
+          </View>
+        </Card>
         
         {/* Premium Upsell */}
         {!isPremium && (
@@ -485,7 +424,7 @@ export default function SoundsScreen() {
               <View style={styles.premiumTextContainer}>
                 <Subtitle1 weight="medium">プレミアム会員になる</Subtitle1>
                 <Body1>
-                  すべてのサウンドやバイノーラルビートにアクセスできます。
+                  すべてのサウンドコレクションにアクセスできます。
                 </Body1>
               </View>
             </View>
@@ -529,20 +468,6 @@ const styles = StyleSheet.create({
   categoryLabel: {
     fontSize: 14,
   },
-  mixerCard: {
-    marginBottom: 20,
-  },
-  mixerContent: {
-    flexDirection: 'row',
-    padding: 16,
-    alignItems: 'center',
-  },
-  mixerIcon: {
-    marginRight: 16,
-  },
-  mixerTextContainer: {
-    flex: 1,
-  },
   section: {
     marginBottom: 24,
   },
@@ -556,13 +481,27 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   horizontalItem: {
-    width: 200,
+    width: 220,
     marginRight: 12,
   },
   emptyCard: {
     padding: 24,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  mixerCard: {
+    marginBottom: 16,
+  },
+  mixerCardContent: {
+    flexDirection: 'row',
+    padding: 16,
+    alignItems: 'center',
+  },
+  mixerIcon: {
+    marginRight: 16,
+  },
+  mixerTextContainer: {
+    flex: 1,
   },
   premiumCard: {
     marginBottom: 24,
