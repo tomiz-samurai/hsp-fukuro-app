@@ -1,11 +1,11 @@
 /**
  * Sounds Screen
  * 
- * Browse and play various relaxing sounds with HSP-friendly design.
- * Features categorized sound sections and multi-sound mixing capabilities.
+ * Browse and play various ambient sounds with HSP-friendly design.
+ * Features categorized sounds and easy playback controls.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   StyleSheet, 
@@ -13,12 +13,10 @@ import {
   TouchableOpacity, 
   ActivityIndicator,
   ScrollView,
-  Image,
-  Platform,
 } from 'react-native';
+import { useRouter, Stack } from 'expo-router';
 import { useTheme } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
-import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 
 import ScreenWrapper from '@components/layout/ScreenWrapper';
@@ -45,6 +43,7 @@ const CATEGORIES = [
 export default function SoundsScreen() {
   // Hooks
   const theme = useTheme() as AppTheme;
+  const router = useRouter();
   const { user } = useAuth();
   const { hapticsEnabled } = useAccessibilityStore();
   const isPremium = useAuthStore((state) => state.isPremium);
@@ -53,38 +52,19 @@ export default function SoundsScreen() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [sounds, setSounds] = useState<SoundItem[]>([]);
   const [loadedSounds, setLoadedSounds] = useState<Map<string, SoundInstance>>(new Map());
-  const [loading, setLoading] = useState(true);
+  const [playingSounds, setPlayingSounds] = useState<Set<string>>(new Set());
   const [favorites, setFavorites] = useState<string[]>([]);
-  const [playingSounds, setPlayingSounds] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
   
-  // Setup audio session
+  // Fetch sound data
   useEffect(() => {
-    setupAudio();
-    
-    // Load sounds
     loadSounds();
     
+    // Clean up sounds on unmount
     return () => {
-      // Unload all sounds
-      unloadAllSounds();
+      SoundService.unloadAll();
     };
   }, [isPremium]);
-  
-  // Set up audio session
-  const setupAudio = async () => {
-    try {
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        interruptionModeIOS: Audio.InterruptionModeIOS.DuckOthers,
-        interruptionModeAndroid: Audio.InterruptionModeAndroid.DuckOthers,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-    } catch (error) {
-      console.error('Error setting audio mode:', error);
-    }
-  };
   
   // Load sounds
   const loadSounds = async () => {
@@ -96,25 +76,13 @@ export default function SoundsScreen() {
       setSounds(allSounds);
       
       // Mock favorites for now
-      setFavorites(['nature-rain', 'white-noise-fan']);
+      setFavorites(['nature-rain', 'nature-ocean']);
       
       setLoading(false);
     } catch (error) {
       console.error('Error loading sounds:', error);
       setLoading(false);
     }
-  };
-  
-  // Unload all sounds
-  const unloadAllSounds = async () => {
-    // Stop all playing sounds
-    for (const soundId of playingSounds) {
-      await handleSoundToggle(soundId, true);
-    }
-    
-    // Clear loaded sounds
-    setLoadedSounds(new Map());
-    setPlayingSounds([]);
   };
   
   // Handle category selection
@@ -126,61 +94,58 @@ export default function SoundsScreen() {
     setSelectedCategory(categoryId);
   };
   
-  // Handle sound toggle (play/pause)
-  const handleSoundToggle = async (soundId: string, forceStop = false) => {
+  // Handle sound playback toggle
+  const handlePlayToggle = async (soundId: string) => {
     try {
-      // Get sound instance
-      let instance = loadedSounds.get(soundId);
+      // Check if sound is already playing
+      const isPlaying = playingSounds.has(soundId);
       
-      // Check if sound is playing
-      const isPlaying = playingSounds.includes(soundId);
-      
-      // If forcing stop or sound is playing, stop it
-      if (forceStop || isPlaying) {
-        // If sound instance exists, stop it
-        if (instance) {
-          await SoundService.pauseSound(soundId);
+      if (isPlaying) {
+        // Pause sound
+        await SoundService.pauseSound(soundId);
+        
+        // Update state
+        const newPlayingSounds = new Set(playingSounds);
+        newPlayingSounds.delete(soundId);
+        setPlayingSounds(newPlayingSounds);
+      } else {
+        // Check if sound is loaded
+        let soundInstance = loadedSounds.get(soundId);
+        
+        if (!soundInstance) {
+          // Load sound
+          soundInstance = await SoundService.loadSound(soundId, isPremium);
+          
+          if (soundInstance) {
+            // Update loaded sounds
+            const newLoadedSounds = new Map(loadedSounds);
+            newLoadedSounds.set(soundId, soundInstance);
+            setLoadedSounds(newLoadedSounds);
+          } else {
+            // Failed to load sound
+            return;
+          }
         }
         
-        // Update playing sounds
-        setPlayingSounds((prev) => prev.filter((id) => id !== soundId));
+        // Play sound
+        await SoundService.playSound(soundId, isPremium);
         
-        if (hapticsEnabled) {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        }
-        
-        return;
+        // Update state
+        const newPlayingSounds = new Set(playingSounds);
+        newPlayingSounds.add(soundId);
+        setPlayingSounds(newPlayingSounds);
       }
       
-      // Otherwise, play or load sound
-      if (!instance) {
-        // Load sound
-        instance = await SoundService.loadSound(soundId, isPremium);
-        
-        if (!instance) {
-          console.error('Failed to load sound:', soundId);
-          return;
-        }
-        
-        // Add to loaded sounds
-        setLoadedSounds((prev) => {
-          const newMap = new Map(prev);
-          newMap.set(soundId, instance!);
-          return newMap;
-        });
-      }
-      
-      // Play sound
-      await SoundService.playSound(soundId, isPremium);
-      
-      // Update playing sounds
-      setPlayingSounds((prev) => [...prev, soundId]);
-      
+      // Haptic feedback
       if (hapticsEnabled) {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        Haptics.impactAsync(
+          isPlaying ? 
+            Haptics.ImpactFeedbackStyle.Light : 
+            Haptics.ImpactFeedbackStyle.Medium
+        );
       }
     } catch (error) {
-      console.error('Error toggling sound:', error);
+      console.error('Error toggling sound playback:', error);
     }
   };
   
@@ -188,25 +153,12 @@ export default function SoundsScreen() {
   const handleVolumeChange = async (soundId: string, volume: number) => {
     try {
       await SoundService.setVolume(soundId, volume);
-      
-      // Update loaded sound volume
-      setLoadedSounds((prev) => {
-        const newMap = new Map(prev);
-        const instance = newMap.get(soundId);
-        
-        if (instance) {
-          instance.volume = volume;
-          newMap.set(soundId, instance);
-        }
-        
-        return newMap;
-      });
     } catch (error) {
       console.error('Error changing volume:', error);
     }
   };
   
-  // Toggle favorite
+  // Toggle favorite status
   const handleToggleFavorite = (soundId: string) => {
     if (hapticsEnabled) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -214,32 +166,20 @@ export default function SoundsScreen() {
     
     setFavorites((prev) => {
       if (prev.includes(soundId)) {
-        return prev.filter((id) => id !== soundId);
+        return prev.filter(id => id !== soundId);
       } else {
         return [...prev, soundId];
       }
     });
   };
   
-  // Stop all sounds
-  const stopAllSounds = async () => {
-    // Stop all playing sounds
-    for (const soundId of playingSounds) {
-      await handleSoundToggle(soundId, true);
-    }
-    
-    if (hapticsEnabled) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
-  };
-  
   // Filtered sounds based on selected category
   const filteredSounds = selectedCategory === 'all'
     ? sounds
-    : sounds.filter((s) => s.category === selectedCategory);
+    : sounds.filter(s => s.category === selectedCategory);
   
   // Favorite sounds
-  const favoriteSounds = sounds.filter((s) => favorites.includes(s.id));
+  const favoriteSounds = sounds.filter(s => favorites.includes(s.id));
   
   // Render category item
   const renderCategoryItem = ({ item }: { item: typeof CATEGORIES[0] }) => (
@@ -270,22 +210,23 @@ export default function SoundsScreen() {
   );
   
   // Render sound item
-  const renderSoundItem = ({ item }: { item: SoundItem }) => {
-    const isPlaying = playingSounds.includes(item.id);
-    const soundInstance = loadedSounds.get(item.id);
+  const renderSoundItem = (sound: SoundItem) => {
+    const isPlaying = playingSounds.has(sound.id);
+    const soundInstance = loadedSounds.get(sound.id);
     
     return (
       <SoundCard
-        sound={item}
+        key={sound.id}
+        sound={sound}
         soundInstance={soundInstance}
         isPlaying={isPlaying}
-        onPlayToggle={() => handleSoundToggle(item.id)}
-        onVolumeChange={(volume) => handleVolumeChange(item.id, volume)}
-        isFavorite={favorites.includes(item.id)}
-        onToggleFavorite={() => handleToggleFavorite(item.id)}
+        onPlayToggle={() => handlePlayToggle(sound.id)}
+        onVolumeChange={(volume) => handleVolumeChange(sound.id, volume)}
+        isFavorite={favorites.includes(sound.id)}
+        onToggleFavorite={() => handleToggleFavorite(sound.id)}
         isPremiumUser={isPremium}
         size="medium"
-        testID={`sound-${item.id}`}
+        testID={`sound-${sound.id}`}
       />
     );
   };
@@ -304,37 +245,16 @@ export default function SoundsScreen() {
   
   return (
     <ScreenWrapper scrollable>
+      <Stack.Screen options={{ headerShown: false }} />
+      
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
           <H2>サウンド</H2>
           <Body1 style={styles.subtitle}>
-            リラクゼーションや集中のための環境音
+            HSP向けの心地よい環境音
           </Body1>
         </View>
-        
-        {/* Currently playing + stop all button */}
-        {playingSounds.length > 0 && (
-          <Card style={styles.playingCard}>
-            <View style={styles.playingCardContent}>
-              <View style={styles.playingInfo}>
-                <Subtitle1 style={styles.playingTitle}>
-                  再生中: {playingSounds.length}個のサウンド
-                </Subtitle1>
-                <Body2>
-                  複数のサウンドをミックスして、あなただけの環境音を作りましょう
-                </Body2>
-              </View>
-              
-              <TouchableOpacity
-                style={[styles.stopButton, { backgroundColor: theme.colors.error }]}
-                onPress={stopAllSounds}
-              >
-                <Ionicons name="stop" size={20} color="white" />
-              </TouchableOpacity>
-            </View>
-          </Card>
-        )}
         
         {/* Categories */}
         <View style={styles.categoriesContainer}>
@@ -348,6 +268,33 @@ export default function SoundsScreen() {
           />
         </View>
         
+        {/* Now Playing */}
+        {playingSounds.size > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <H3>再生中</H3>
+              <TouchableOpacity
+                onPress={() => {
+                  // Stop all sounds
+                  playingSounds.forEach(async (soundId) => {
+                    await SoundService.pauseSound(soundId);
+                  });
+                  setPlayingSounds(new Set());
+                }}
+              >
+                <Body2 color={theme.colors.primary}>すべて停止</Body2>
+              </TouchableOpacity>
+            </View>
+            
+            {Array.from(playingSounds).map((soundId) => {
+              const sound = sounds.find(s => s.id === soundId);
+              if (!sound) return null;
+              
+              return renderSoundItem(sound);
+            })}
+          </View>
+        )}
+        
         {/* Favorites */}
         {favoriteSounds.length > 0 && selectedCategory === 'all' && (
           <View style={styles.section}>
@@ -355,27 +302,7 @@ export default function SoundsScreen() {
               <H3>お気に入り</H3>
             </View>
             
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalList}
-            >
-              {favoriteSounds.map((sound) => (
-                <View key={sound.id} style={styles.horizontalItem}>
-                  <SoundCard
-                    sound={sound}
-                    soundInstance={loadedSounds.get(sound.id)}
-                    isPlaying={playingSounds.includes(sound.id)}
-                    onPlayToggle={() => handleSoundToggle(sound.id)}
-                    onVolumeChange={(volume) => handleVolumeChange(sound.id, volume)}
-                    isFavorite={true}
-                    onToggleFavorite={() => handleToggleFavorite(sound.id)}
-                    isPremiumUser={isPremium}
-                    size="small"
-                  />
-                </View>
-              ))}
-            </ScrollView>
+            {favoriteSounds.map(sound => renderSoundItem(sound))}
           </View>
         )}
         
@@ -397,20 +324,7 @@ export default function SoundsScreen() {
               </Body1>
             </Card>
           ) : (
-            filteredSounds.map((sound) => (
-              <SoundCard
-                key={sound.id}
-                sound={sound}
-                soundInstance={loadedSounds.get(sound.id)}
-                isPlaying={playingSounds.includes(sound.id)}
-                onPlayToggle={() => handleSoundToggle(sound.id)}
-                onVolumeChange={(volume) => handleVolumeChange(sound.id, volume)}
-                isFavorite={favorites.includes(sound.id)}
-                onToggleFavorite={() => handleToggleFavorite(sound.id)}
-                isPremiumUser={isPremium}
-                size="medium"
-              />
-            ))
+            filteredSounds.map(sound => renderSoundItem(sound))
           )}
         </View>
         
@@ -430,32 +344,17 @@ export default function SoundsScreen() {
               <View style={styles.premiumTextContainer}>
                 <Subtitle1 weight="medium">プレミアム会員になる</Subtitle1>
                 <Body1>
-                  すべてのサウンドとミックス機能にアクセスできます。
+                  すべての音源とミキシング機能にアクセスできます。
                 </Body1>
               </View>
             </View>
           </Card>
         )}
         
-        {/* Tips for HSP users */}
-        <Card style={styles.tipsCard}>
-          <View style={styles.tipsHeader}>
-            <Ionicons
-              name="bulb-outline"
-              size={24}
-              color={theme.colors.primary}
-              style={styles.tipsIcon}
-            />
-            <Subtitle1 weight="medium">HSPのためのヒント</Subtitle1>
-          </View>
-          <Body1 style={styles.tipsText}>
-            1. 自然音は心拍数と呼吸を整えるのに効果的です。
-          </Body1>
-          <Body1 style={styles.tipsText}>
-            2. ホワイトノイズは外部刺激をマスクして集中力を高めます。
-          </Body1>
-          <Body1 style={styles.tipsText}>
-            3. 複数のサウンドを組み合わせて、自分だけの心地よい環境を作りましょう。
+        {/* Sound mixing information */}
+        <Card style={styles.infoCard}>
+          <Body1>
+            複数のサウンドを同時に再生すると、独自のサウンドスケープを作成できます。サウンドごとに音量を調整して、最適な環境を見つけましょう。
           </Body1>
         </Card>
       </View>
@@ -474,28 +373,6 @@ const styles = StyleSheet.create({
   subtitle: {
     marginTop: 4,
     opacity: 0.8,
-  },
-  playingCard: {
-    marginBottom: 16,
-  },
-  playingCardContent: {
-    flexDirection: 'row',
-    padding: 16,
-    alignItems: 'center',
-  },
-  playingInfo: {
-    flex: 1,
-  },
-  playingTitle: {
-    marginBottom: 4,
-  },
-  stopButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 16,
   },
   categoriesContainer: {
     marginBottom: 20,
@@ -527,13 +404,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  horizontalList: {
-    paddingVertical: 4,
-  },
-  horizontalItem: {
-    width: 250,
-    marginRight: 12,
-  },
   emptyCard: {
     padding: 24,
     alignItems: 'center',
@@ -553,20 +423,9 @@ const styles = StyleSheet.create({
   premiumTextContainer: {
     flex: 1,
   },
-  tipsCard: {
+  infoCard: {
     marginBottom: 24,
     padding: 16,
-  },
-  tipsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  tipsIcon: {
-    marginRight: 12,
-  },
-  tipsText: {
-    marginBottom: 8,
   },
   loadingContainer: {
     flex: 1,
