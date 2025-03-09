@@ -1,8 +1,8 @@
 /**
  * Profile Screen
  * 
- * The user profile and settings screen with HSP-friendly design.
- * Features account management, app settings, and user statistics.
+ * User profile, settings, and accessibility options with HSP-friendly design.
+ * Features user stats, preferences, and app customization.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -10,26 +10,41 @@ import {
   View, 
   StyleSheet, 
   TouchableOpacity, 
-  ScrollView, 
+  Image, 
   Switch,
-  Image,
   Alert,
-  Platform,
+  ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, Stack } from 'expo-router';
 import { useTheme } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
 import ScreenWrapper from '@components/layout/ScreenWrapper';
 import Card from '@components/ui/molecules/Card';
-import { H2, H3, Body1, Body2, Subtitle1, Subtitle2 } from '@components/ui/atoms/Typography';
+import Button from '@components/ui/atoms/Button';
+import { H2, H3, Body1, Body2, Subtitle1 } from '@components/ui/atoms/Typography';
 import { useAuth } from '@components/providers/AuthProvider';
 import { useAuthStore } from '@store/slices/authSlice';
-import { useAccessibilityStore } from '@store/slices/uiSlice';
-import { useThemeStore } from '@store/slices/uiSlice';
+import { useAccessibilityStore, useThemeStore } from '@store/slices/uiSlice';
 import { MeditationService } from '@services/meditation.service';
 import { AppTheme } from '@config/theme';
+
+// Settings section interface
+interface SettingsSection {
+  title: string;
+  items: {
+    id: string;
+    title: string;
+    description?: string;
+    icon: string;
+    type: 'toggle' | 'button' | 'slider' | 'link';
+    value?: boolean | number;
+    onPress?: () => void;
+    onToggle?: (value: boolean) => void;
+    onValueChange?: (value: number) => void;
+  }[];
+}
 
 // Profile screen component
 export default function ProfileScreen() {
@@ -37,467 +52,307 @@ export default function ProfileScreen() {
   const theme = useTheme() as AppTheme;
   const router = useRouter();
   const { user, profile, signOut } = useAuth();
-  const { hapticsEnabled, setHapticsEnabled } = useAccessibilityStore();
-  const { animationsEnabled, setAnimationsEnabled } = useAccessibilityStore();
-  const { visualIntensity, setVisualIntensity } = useAccessibilityStore();
+  const { hapticsEnabled, animationsEnabled, visualIntensity, setHapticsEnabled, setAnimationsEnabled, setVisualIntensity } = useAccessibilityStore();
   const { isDarkTheme, toggleTheme } = useThemeStore();
   const isPremium = useAuthStore((state) => state.isPremium);
-  const resetState = useAuthStore((state) => state.resetState);
   
-  // Stats state
-  const [meditationMinutes, setMeditationMinutes] = useState(0);
+  // User stats
+  const [totalMeditationMinutes, setTotalMeditationMinutes] = useState(0);
   const [meditationStreak, setMeditationStreak] = useState(0);
-  const [meditationSessions, setMeditationSessions] = useState(0);
   
   // Load user stats
   useEffect(() => {
     if (user?.id) {
-      loadStats();
+      loadUserStats();
     }
   }, [user?.id]);
   
-  // Load user statistics
-  const loadStats = async () => {
+  // Load user stats
+  const loadUserStats = async () => {
     try {
-      if (!user?.id) return;
+      // Get total meditation time
+      const totalTime = await MeditationService.getTotalMeditationTime(user!.id);
+      setTotalMeditationMinutes(totalTime);
       
-      // Get meditation stats
-      const totalTime = await MeditationService.getTotalMeditationTime(user.id);
-      const streak = await MeditationService.getMeditationStreak(user.id);
-      const sessions = await MeditationService.getMeditationHistory(user.id);
-      
-      setMeditationMinutes(totalTime);
+      // Get meditation streak
+      const streak = await MeditationService.getMeditationStreak(user!.id);
       setMeditationStreak(streak);
-      setMeditationSessions(sessions.length);
     } catch (error) {
-      console.error('Error loading stats:', error);
+      console.error('Error loading user stats:', error);
     }
   };
   
   // Handle sign out
-  const handleSignOut = async () => {
-    try {
-      Alert.alert(
-        'サインアウトの確認',
-        '本当にサインアウトしますか？',
-        [
-          { text: 'キャンセル', style: 'cancel' },
-          { 
-            text: 'サインアウト', 
-            style: 'destructive',
-            onPress: async () => {
-              await signOut();
-              resetState();
-              
-              if (hapticsEnabled) {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              }
+  const handleSignOut = () => {
+    Alert.alert(
+      'ログアウト',
+      'ログアウトしてもよろしいですか？',
+      [
+        { text: 'キャンセル', style: 'cancel' },
+        { 
+          text: 'ログアウト', 
+          style: 'destructive',
+          onPress: async () => {
+            await signOut();
+          } 
+        },
+      ]
+    );
+  };
+  
+  // Generate settings sections
+  const settingsSections: SettingsSection[] = [
+    {
+      title: 'アカウント',
+      items: [
+        {
+          id: 'subscription',
+          title: isPremium ? 'プレミアム会員' : 'プレミアムにアップグレード',
+          description: isPremium ? '有効期限: 2025年12月31日' : '全ての機能にアクセスできるようになります',
+          icon: 'star',
+          type: 'link',
+          onPress: () => {
+            router.push('/profile/subscription');
+          },
+        },
+        {
+          id: 'edit-profile',
+          title: 'プロフィール編集',
+          icon: 'person',
+          type: 'link',
+          onPress: () => {
+            router.push('/profile/edit');
+          },
+        },
+      ],
+    },
+    {
+      title: 'アプリ設定',
+      items: [
+        {
+          id: 'dark-mode',
+          title: 'ダークモード',
+          description: 'ダークテーマを使用する',
+          icon: 'moon',
+          type: 'toggle',
+          value: isDarkTheme,
+          onToggle: (value) => {
+            toggleTheme();
+          },
+        },
+        {
+          id: 'haptics',
+          title: '触覚フィードバック',
+          description: 'ボタン操作時の触覚フィードバック',
+          icon: 'vibrate',
+          type: 'toggle',
+          value: hapticsEnabled,
+          onToggle: (value) => {
+            setHapticsEnabled(value);
+            
+            // Demo haptic feedback
+            if (value) {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             }
           },
-        ]
-      );
-    } catch (error) {
-      console.error('Error signing out:', error);
-    }
-  };
+        },
+        {
+          id: 'animations',
+          title: 'アニメーション',
+          description: 'アプリ内のアニメーション効果',
+          icon: 'film',
+          type: 'toggle',
+          value: animationsEnabled,
+          onToggle: (value) => {
+            setAnimationsEnabled(value);
+          },
+        },
+      ],
+    },
+    {
+      title: 'HSP向け設定',
+      items: [
+        {
+          id: 'visual-intensity',
+          title: '視覚的強度',
+          description: `現在: ${visualIntensity}%`,
+          icon: 'contrast',
+          type: 'slider',
+          value: visualIntensity,
+          onValueChange: (value) => {
+            setVisualIntensity(value);
+          },
+        },
+        {
+          id: 'hsp-resources',
+          title: 'HSPリソース',
+          description: 'HSPに関する情報とリソース',
+          icon: 'information-circle',
+          type: 'link',
+          onPress: () => {
+            router.push('/profile/resources');
+          },
+        },
+      ],
+    },
+    {
+      title: 'サポート',
+      items: [
+        {
+          id: 'help',
+          title: 'ヘルプとフィードバック',
+          icon: 'help-circle',
+          type: 'link',
+          onPress: () => {
+            router.push('/profile/help');
+          },
+        },
+        {
+          id: 'about',
+          title: 'Fukuroについて',
+          icon: 'information',
+          type: 'link',
+          onPress: () => {
+            router.push('/profile/about');
+          },
+        },
+      ],
+    },
+  ];
   
-  // Handle visual intensity change
-  const handleVisualIntensityChange = (value: number) => {
-    setVisualIntensity(value);
-  };
-  
-  // Toggle haptic feedback
-  const toggleHaptics = () => {
-    setHapticsEnabled(!hapticsEnabled);
-    
-    if (hapticsEnabled) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
-  };
-  
-  // Toggle animations
-  const toggleAnimations = () => {
-    setAnimationsEnabled(!animationsEnabled);
-    
-    if (hapticsEnabled) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-  };
-  
-  // Toggle theme
-  const handleToggleTheme = () => {
-    toggleTheme();
-    
-    if (hapticsEnabled) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    }
-  };
-  
-  // Format email for display
-  const formatEmail = (email: string) => {
-    if (!email) return '';
-    
-    // If email is too long, truncate with ellipsis
-    if (email.length > 25) {
-      return email.substring(0, 22) + '...';
-    }
-    
-    return email;
+  // Render settings item
+  const renderSettingsItem = (item: SettingsSection['items'][0]) => {
+    return (
+      <TouchableOpacity
+        key={item.id}
+        style={styles.settingsItem}
+        onPress={item.type === 'link' ? item.onPress : undefined}
+        disabled={item.type !== 'link'}
+      >
+        <View style={styles.settingsItemContent}>
+          <View 
+            style={[
+              styles.settingsItemIcon,
+              { backgroundColor: isDarkTheme ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' },
+            ]}
+          >
+            <Ionicons 
+              name={item.icon as any} 
+              size={20} 
+              color={theme.colors.primary} 
+            />
+          </View>
+          
+          <View style={styles.settingsItemText}>
+            <Body1 weight="medium">{item.title}</Body1>
+            {item.description && (
+              <Body2 style={styles.settingsItemDescription}>
+                {item.description}
+              </Body2>
+            )}
+          </View>
+          
+          <View style={styles.settingsItemControl}>
+            {item.type === 'toggle' && (
+              <Switch
+                value={item.value as boolean}
+                onValueChange={item.onToggle}
+                trackColor={{ 
+                  false: theme.colors.surfaceVariant, 
+                  true: theme.colors.primary 
+                }}
+                thumbColor={theme.colors.background}
+              />
+            )}
+            
+            {item.type === 'link' && (
+              <Ionicons 
+                name="chevron-forward" 
+                size={20} 
+                color={theme.colors.textSecondary} 
+              />
+            )}
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
   };
   
   return (
     <ScreenWrapper scrollable>
+      <Stack.Screen options={{ headerShown: false }} />
+      
       <View style={styles.container}>
-        {/* Header with user info */}
+        {/* Header */}
         <View style={styles.header}>
-          <View style={styles.userContainer}>
-            <View 
-              style={[
-                styles.avatarContainer, 
-                { 
-                  backgroundColor: theme.colors.surfaceVariant,
-                  borderColor: theme.colors.primary,
-                },
-              ]}
-            >
+          <H2>プロフィール</H2>
+        </View>
+        
+        {/* Profile card */}
+        <Card style={styles.profileCard}>
+          <View style={styles.profileContent}>
+            <View style={styles.avatarContainer}>
               <Image
-                source={require('@assets/images/user-avatar-placeholder.png')}
+                source={require('@assets/images/default-avatar.png')}
                 style={styles.avatar}
                 resizeMode="cover"
               />
+              
+              {isPremium && (
+                <View 
+                  style={[
+                    styles.premiumBadge,
+                    { backgroundColor: theme.colors.primary },
+                  ]}
+                >
+                  <Ionicons name="star" size={12} color={theme.colors.background} />
+                </View>
+              )}
             </View>
             
-            <View style={styles.userInfo}>
-              <H2 style={styles.userName}>
-                {profile?.display_name || user?.email?.split('@')[0] || 'ユーザー'}
-              </H2>
-              <Body1 style={styles.userEmail}>
-                {formatEmail(user?.email || '')}
-              </Body1>
+            <View style={styles.profileInfo}>
+              <H3>{profile?.display_name || '名前未設定'}</H3>
+              <Body1 style={styles.email}>{user?.email}</Body1>
               
-              {/* Plan badge */}
-              <View 
-                style={[
-                  styles.planBadge,
-                  {
-                    backgroundColor: isPremium ? theme.colors.secondary : theme.colors.surface,
-                    borderColor: isPremium ? 'transparent' : theme.colors.outline,
-                  },
-                ]}
-              >
-                <Body2 
-                  style={{ 
-                    color: isPremium ? theme.colors.background : theme.colors.text,
-                    fontFamily: theme.typography.fontFamily.medium,
-                  }}
-                >
-                  {isPremium ? 'プレミアム会員' : '無料プラン'}
-                </Body2>
+              <View style={styles.statsContainer}>
+                <View style={styles.statItem}>
+                  <Body2 style={styles.statValue}>{totalMeditationMinutes}</Body2>
+                  <Body2 style={styles.statLabel}>瞑想(分)</Body2>
+                </View>
+                
+                <View style={styles.statItem}>
+                  <Body2 style={styles.statValue}>{meditationStreak}</Body2>
+                  <Body2 style={styles.statLabel}>連続日数</Body2>
+                </View>
               </View>
             </View>
           </View>
-        </View>
-        
-        {/* Stats cards */}
-        <View style={styles.statsRow}>
-          {/* Meditation minutes */}
-          <Card style={styles.statsCard}>
-            <View style={styles.statsContent}>
-              <Ionicons 
-                name="timer-outline"
-                size={24}
-                color={theme.colors.primary}
-                style={styles.statsIcon}
-              />
-              <H3 style={styles.statsValue}>{meditationMinutes}</H3>
-              <Body2 style={styles.statsLabel}>瞑想分数</Body2>
-            </View>
-          </Card>
-          
-          {/* Meditation streak */}
-          <Card style={styles.statsCard}>
-            <View style={styles.statsContent}>
-              <Ionicons 
-                name="flame-outline"
-                size={24}
-                color={theme.colors.primary}
-                style={styles.statsIcon}
-              />
-              <H3 style={styles.statsValue}>{meditationStreak}</H3>
-              <Body2 style={styles.statsLabel}>連続日数</Body2>
-            </View>
-          </Card>
-          
-          {/* Meditation count */}
-          <Card style={styles.statsCard}>
-            <View style={styles.statsContent}>
-              <Ionicons 
-                name="checkbox-outline"
-                size={24}
-                color={theme.colors.primary}
-                style={styles.statsIcon}
-              />
-              <H3 style={styles.statsValue}>{meditationSessions}</H3>
-              <Body2 style={styles.statsLabel}>セッション</Body2>
-            </View>
-          </Card>
-        </View>
+        </Card>
         
         {/* Settings sections */}
-        <View style={styles.settingsSection}>
-          <Subtitle1 style={styles.sectionTitle}>アカウント設定</Subtitle1>
-          
-          {/* Edit profile */}
-          <Card style={styles.settingCard}>
-            <TouchableOpacity 
-              style={styles.settingRow}
-              onPress={() => router.push('/profile/edit')}
-            >
-              <View style={styles.settingInfo}>
-                <Ionicons 
-                  name="person-outline"
-                  size={22}
-                  color={theme.colors.primary}
-                  style={styles.settingIcon}
-                />
-                <Body1>プロフィール編集</Body1>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
-            </TouchableOpacity>
-          </Card>
-          
-          {/* Upgrade to premium */}
-          {!isPremium && (
-            <Card 
-              style={styles.premiumCard}
-              backgroundColor={theme.colors.secondaryContainer}
-              onPress={() => router.push('/profile/premium')}
-            >
-              <View style={styles.premiumCardContent}>
-                <Ionicons
-                  name="star"
-                  size={24}
-                  color={theme.colors.secondary}
-                  style={styles.premiumIcon}
-                />
-                <View style={styles.premiumTextContainer}>
-                  <Subtitle1 weight="medium">プレミアム会員になる</Subtitle1>
-                  <Body1>
-                    すべての機能にアクセスして、さらに快適なHSP体験を。
-                  </Body1>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
-              </View>
-            </Card>
-          )}
-        </View>
-        
-        <View style={styles.settingsSection}>
-          <Subtitle1 style={styles.sectionTitle}>アプリ設定</Subtitle1>
-          
-          {/* Theme toggle */}
-          <Card style={styles.settingCard}>
-            <View style={styles.settingRow}>
-              <View style={styles.settingInfo}>
-                <Ionicons 
-                  name={isDarkTheme ? "moon-outline" : "sunny-outline"}
-                  size={22}
-                  color={theme.colors.primary}
-                  style={styles.settingIcon}
-                />
-                <Body1>ダークモード</Body1>
-              </View>
-              <Switch
-                value={isDarkTheme}
-                onValueChange={handleToggleTheme}
-                trackColor={{
-                  false: theme.colors.surfaceVariant,
-                  true: `${theme.colors.primary}99`,
-                }}
-                thumbColor={isDarkTheme ? theme.colors.primary : theme.colors.surface}
-                ios_backgroundColor={theme.colors.surfaceVariant}
-              />
-            </View>
-          </Card>
-          
-          {/* Animations toggle */}
-          <Card style={styles.settingCard}>
-            <View style={styles.settingRow}>
-              <View style={styles.settingInfo}>
-                <Ionicons 
-                  name="pulse-outline"
-                  size={22}
-                  color={theme.colors.primary}
-                  style={styles.settingIcon}
-                />
-                <Body1>アニメーション</Body1>
-              </View>
-              <Switch
-                value={animationsEnabled}
-                onValueChange={toggleAnimations}
-                trackColor={{
-                  false: theme.colors.surfaceVariant,
-                  true: `${theme.colors.primary}99`,
-                }}
-                thumbColor={animationsEnabled ? theme.colors.primary : theme.colors.surface}
-                ios_backgroundColor={theme.colors.surfaceVariant}
-              />
-            </View>
-          </Card>
-          
-          {/* Haptic feedback toggle */}
-          {Platform.OS !== 'web' && (
-            <Card style={styles.settingCard}>
-              <View style={styles.settingRow}>
-                <View style={styles.settingInfo}>
-                  <Ionicons 
-                    name="vibrate-outline"
-                    size={22}
-                    color={theme.colors.primary}
-                    style={styles.settingIcon}
-                  />
-                  <Body1>触覚フィードバック</Body1>
-                </View>
-                <Switch
-                  value={hapticsEnabled}
-                  onValueChange={toggleHaptics}
-                  trackColor={{
-                    false: theme.colors.surfaceVariant,
-                    true: `${theme.colors.primary}99`,
-                  }}
-                  thumbColor={hapticsEnabled ? theme.colors.primary : theme.colors.surface}
-                  ios_backgroundColor={theme.colors.surfaceVariant}
-                />
-              </View>
-            </Card>
-          )}
-          
-          {/* Visual intensity - HSP specific setting */}
-          <Card style={styles.settingCard}>
-            <View style={[styles.settingRow, styles.visualIntensitySetting]}>
-              <View style={styles.settingInfo}>
-                <Ionicons 
-                  name="contrast-outline"
-                  size={22}
-                  color={theme.colors.primary}
-                  style={styles.settingIcon}
-                />
-                <View>
-                  <Body1>視覚強度</Body1>
-                  <Body2 style={styles.settingDescription}>
-                    視覚的な強さを調整して、HSPに優しい表示にします
-                  </Body2>
-                </View>
-              </View>
+        {settingsSections.map((section) => (
+          <View key={section.title} style={styles.settingsSection}>
+            <View style={styles.sectionHeader}>
+              <Subtitle1 style={styles.sectionTitle}>{section.title}</Subtitle1>
             </View>
             
-            {/* Visual intensity slider */}
-            <View style={styles.sliderContainer}>
-              <Ionicons name="eye-outline" size={16} color={theme.colors.textSecondary} />
-              
-              {/* This would be a custom slider in a real app */}
-              <View style={styles.sliderTrack}>
-                <View 
-                  style={[
-                    styles.sliderFill, 
-                    { 
-                      width: `${visualIntensity}%`,
-                      backgroundColor: theme.colors.primary,
-                    },
-                  ]}
-                />
-              </View>
-              
-              <Ionicons name="eye" size={16} color={theme.colors.textSecondary} />
-            </View>
-            
-            <View style={styles.sliderLabels}>
-              <Body2 style={styles.sliderLabel}>穏やか</Body2>
-              <Body2 style={styles.sliderLabel}>標準</Body2>
-            </View>
-          </Card>
-        </View>
-        
-        <View style={styles.settingsSection}>
-          <Subtitle1 style={styles.sectionTitle}>情報</Subtitle1>
-          
-          {/* About */}
-          <Card style={styles.settingCard}>
-            <TouchableOpacity 
-              style={styles.settingRow}
-              onPress={() => router.push('/profile/about')}
-            >
-              <View style={styles.settingInfo}>
-                <Ionicons 
-                  name="information-circle-outline"
-                  size={22}
-                  color={theme.colors.primary}
-                  style={styles.settingIcon}
-                />
-                <Body1>Fukuroについて</Body1>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
-            </TouchableOpacity>
-          </Card>
-          
-          {/* Help */}
-          <Card style={styles.settingCard}>
-            <TouchableOpacity 
-              style={styles.settingRow}
-              onPress={() => router.push('/profile/help')}
-            >
-              <View style={styles.settingInfo}>
-                <Ionicons 
-                  name="help-circle-outline"
-                  size={22}
-                  color={theme.colors.primary}
-                  style={styles.settingIcon}
-                />
-                <Body1>ヘルプとサポート</Body1>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
-            </TouchableOpacity>
-          </Card>
-          
-          {/* Privacy */}
-          <Card style={styles.settingCard}>
-            <TouchableOpacity 
-              style={styles.settingRow}
-              onPress={() => router.push('/profile/privacy')}
-            >
-              <View style={styles.settingInfo}>
-                <Ionicons 
-                  name="shield-outline"
-                  size={22}
-                  color={theme.colors.primary}
-                  style={styles.settingIcon}
-                />
-                <Body1>プライバシーポリシー</Body1>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
-            </TouchableOpacity>
-          </Card>
-        </View>
+            <Card elevation="low">
+              {section.items.map((item) => renderSettingsItem(item))}
+            </Card>
+          </View>
+        ))}
         
         {/* Sign out button */}
-        <TouchableOpacity
-          style={[
-            styles.signOutButton,
-            { borderColor: theme.colors.outline },
-          ]}
+        <Button
+          label="ログアウト"
+          variant="outline"
           onPress={handleSignOut}
-        >
-          <Ionicons 
-            name="log-out-outline"
-            size={20}
-            color={theme.colors.error}
-            style={styles.signOutIcon}
-          />
-          <Body1 color={theme.colors.error}>サインアウト</Body1>
-        </TouchableOpacity>
+          fullWidth
+          style={styles.signOutButton}
+        />
         
-        {/* App version */}
-        <Body2 style={styles.versionText}>
+        {/* Version info */}
+        <Body2 style={styles.versionInfo}>
           Fukuro v0.1.0
         </Body2>
       </View>
@@ -511,147 +366,97 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   header: {
+    marginBottom: 20,
+  },
+  profileCard: {
     marginBottom: 24,
   },
-  userContainer: {
+  profileContent: {
     flexDirection: 'row',
-    alignItems: 'center',
+    padding: 16,
   },
   avatarContainer: {
+    position: 'relative',
+    marginRight: 16,
+  },
+  avatar: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    overflow: 'hidden',
-    borderWidth: 2,
   },
-  avatar: {
-    width: '100%',
-    height: '100%',
-  },
-  userInfo: {
-    marginLeft: 16,
-    flex: 1,
-  },
-  userName: {
-    marginBottom: 4,
-  },
-  userEmail: {
-    opacity: 0.7,
-    marginBottom: 8,
-  },
-  planBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+  premiumBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 24,
+    height: 24,
     borderRadius: 12,
-    borderWidth: 1,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  statsCard: {
-    flex: 1,
-    marginHorizontal: 4,
-  },
-  statsContent: {
-    padding: 12,
     alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'white',
   },
-  statsIcon: {
-    marginBottom: 8,
+  profileInfo: {
+    flex: 1,
   },
-  statsValue: {
-    marginBottom: 4,
+  email: {
+    opacity: 0.7,
+    marginBottom: 12,
   },
-  statsLabel: {
+  statsContainer: {
+    flexDirection: 'row',
+  },
+  statItem: {
+    marginRight: 24,
+  },
+  statValue: {
+    fontSize: 18,
+    fontFamily: 'NotoSansJP-Medium',
+  },
+  statLabel: {
     opacity: 0.7,
   },
   settingsSection: {
     marginBottom: 24,
   },
+  sectionHeader: {
+    marginLeft: 12,
+    marginBottom: 8,
+  },
   sectionTitle: {
-    marginBottom: 12,
-    fontFamily: 'NotoSansJP-Medium',
+    opacity: 0.8,
   },
-  settingCard: {
-    marginBottom: 12,
+  settingsItem: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(0,0,0,0.1)',
   },
-  settingRow: {
+  settingsItemContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     padding: 16,
   },
-  visualIntensitySetting: {
-    paddingBottom: 8,
-  },
-  settingInfo: {
-    flexDirection: 'row',
+  settingsItemIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  settingsItemText: {
     flex: 1,
   },
-  settingIcon: {
-    marginRight: 12,
-  },
-  settingDescription: {
+  settingsItemDescription: {
     opacity: 0.7,
     marginTop: 2,
   },
-  sliderContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  sliderTrack: {
-    flex: 1,
-    height: 4,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
-    borderRadius: 2,
-    marginHorizontal: 12,
-  },
-  sliderFill: {
-    height: 4,
-    borderRadius: 2,
-  },
-  sliderLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-  },
-  sliderLabel: {
-    opacity: 0.6,
-  },
-  premiumCard: {
-    marginBottom: 12,
-  },
-  premiumCardContent: {
-    flexDirection: 'row',
-    padding: 16,
-    alignItems: 'center',
-  },
-  premiumIcon: {
-    marginRight: 16,
-  },
-  premiumTextContainer: {
-    flex: 1,
+  settingsItemControl: {
+    marginLeft: 16,
   },
   signOutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
     marginBottom: 24,
-    borderRadius: 8,
-    borderWidth: 1,
   },
-  signOutIcon: {
-    marginRight: 8,
-  },
-  versionText: {
+  versionInfo: {
     textAlign: 'center',
     opacity: 0.5,
     marginBottom: 24,
